@@ -1,0 +1,40 @@
+# Batti
+
+A Dhaka household product: people in an Area see whether power is up or down, and can file a Report. Power-company tooling is out of v1. Named after the Bangla word for a lamp.
+
+## Language
+
+**Batti**:
+The Crowd-facing board for Dhaka load-shedding. Named after the Bangla word for a lamp.
+_Avoid_: Dashboard, app, Gridwatch
+A person in an Area who can view status and submit a Report. v1 has this role only.
+_Avoid_: User, citizen, customer (too vague); Admin (that is a different role)
+
+**Admin**:
+A power-company or operator account that can override or moderate Reports. Not in v1.
+_Avoid_: Crowd, staff user
+
+**Area**:
+A named Dhaka neighborhood from a fixed list of about twelve (for example Dhanmondi, Gulshan, Mirpur-10). v1 does not use feeder codes or GPS polygons.
+_Avoid_: Feeder, zone, thana (unless we later add them as labels on an Area)
+
+**Report**:
+One Crowd tap of On, Off, or Unsure for one Area at one time. No photo and no login in v1.
+
+**Status**:
+On or Off from the majority of On vs Off Reports in the last 30 minutes in that Area. Unsure does not vote. If there is no Report in 30 minutes, Status is Stale. A tie uses the latest On or Off Report in that window.
+
+**Seed**:
+Mock Reports shipped with the app so the Map and charts are not empty on first load. Seed is not live grid data.
+_Avoid_: Live feed, DESCO data, real outage (unless a Crowd Report just happened)
+
+**Forecast**:
+A restore-time guess shown after a short “model” wait. v1 is theater from Seed, not a trained model.
+_Avoid_: ML model, DESCO forecast
+
+**Advice**:
+Long-form text for an Area (what to do, typical local setup). v1 is canned copy after the Forecast wait, not a site survey.
+_Avoid_: Engineering plan, solar design
+
+**Map**:
+A geographic view of the twelve Areas. v1 is a map library with pins, not official feeder polygons.
