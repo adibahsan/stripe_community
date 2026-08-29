@@ -139,6 +139,89 @@ describe("validateAssistantRequest", () => {
     valid.message = "  hello  ";
     expect(validateAssistantRequest(valid)?.message).toBe("hello");
   });
+
+  test("rejects Area names that do not match canonical AREAS names", () => {
+    const valid = buildValidRequest();
+    const areas = buildValidAreas();
+    areas[0] = { ...areas[0], name: "Fake Dhanmondi" };
+    expect(validateAssistantRequest({ ...valid, areas })).toBeNull();
+  });
+
+  test("rejects crowd counts that are not non-negative integers", () => {
+    const valid = buildValidRequest();
+    const areas = buildValidAreas();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        areas: areas.map((area, index) =>
+          index === 0
+            ? { ...area, crowd: { ...area.crowd, on: -1 } }
+            : area,
+        ),
+      }),
+    ).toBeNull();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        areas: areas.map((area, index) =>
+          index === 0
+            ? { ...area, crowd: { ...area.crowd, off: 1.5 } }
+            : area,
+        ),
+      }),
+    ).toBeNull();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        areas: areas.map((area, index) =>
+          index === 0
+            ? { ...area, crowd: { ...area.crowd, unsure: Number.NaN } }
+            : area,
+        ),
+      }),
+    ).toBeNull();
+  });
+
+  test("rejects history messages with empty or overlong trimmed content", () => {
+    const valid = buildValidRequest();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        history: [{ role: "user", content: "" }],
+      }),
+    ).toBeNull();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        history: [{ role: "user", content: "   " }],
+      }),
+    ).toBeNull();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        history: [{ role: "user", content: "x".repeat(1001) }],
+      }),
+    ).toBeNull();
+
+    expect(
+      validateAssistantRequest({
+        ...valid,
+        history: [{ role: "user", content: `  ${"x".repeat(1001)}  ` }],
+      }),
+    ).toBeNull();
+  });
+
+  test("trims history message content before validation", () => {
+    const valid = buildValidRequest();
+    valid.history = [{ role: "assistant", content: "  Ki obostha?  " }];
+    expect(validateAssistantRequest(valid)?.history[0].content).toBe("Ki obostha?");
+  });
 });
 
 describe("validateClassification", () => {

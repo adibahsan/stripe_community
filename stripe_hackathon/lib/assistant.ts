@@ -3,6 +3,7 @@ import type { AreaId, Eta, Forecast, Report, ReportKind, Status } from "./types"
 
 const WINDOW_MS = 30 * 60_000;
 const AREA_IDS = new Set<AreaId>(AREAS.map((area) => area.id));
+const AREA_NAMES = new Map<AreaId, string>(AREAS.map((area) => [area.id, area.name]));
 
 export type CrowdEvidence = {
   on: number;
@@ -74,23 +75,21 @@ function isEta(value: unknown): value is Eta {
   return typeof value.minutes === "number" && Number.isFinite(value.minutes);
 }
 
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 function isReportKind(value: unknown): value is ReportKind {
   return value === "on" || value === "off" || value === "unsure";
 }
 
 function isCrowdEvidence(value: unknown): value is CrowdEvidence {
   if (!isRecord(value)) return false;
-  if (typeof value.on !== "number" || !Number.isFinite(value.on)) return false;
-  if (typeof value.off !== "number" || !Number.isFinite(value.off)) return false;
-  if (typeof value.unsure !== "number" || !Number.isFinite(value.unsure)) return false;
-  if (value.latestMinutesAgo !== null) {
-    if (
-      typeof value.latestMinutesAgo !== "number" ||
-      !Number.isFinite(value.latestMinutesAgo) ||
-      value.latestMinutesAgo < 0
-    ) {
-      return false;
-    }
+  if (!isNonNegativeInteger(value.on)) return false;
+  if (!isNonNegativeInteger(value.off)) return false;
+  if (!isNonNegativeInteger(value.unsure)) return false;
+  if (value.latestMinutesAgo !== null && !isNonNegativeInteger(value.latestMinutesAgo)) {
+    return false;
   }
   return true;
 }
@@ -151,6 +150,7 @@ function validateAreas(value: unknown): AssistantArea[] | null {
     if (seen.has(item.id)) return null;
     seen.add(item.id);
     if (typeof item.name !== "string") return null;
+    if (item.name !== AREA_NAMES.get(item.id)) return null;
     if (!isStatus(item.status)) return null;
     if (!isEta(item.eta)) return null;
     if (!isCrowdEvidence(item.crowd)) return null;
@@ -176,7 +176,9 @@ function validateHistory(value: unknown): AssistantMessage[] | null {
     if (!isRecord(item)) return null;
     if (item.role !== "user" && item.role !== "assistant") return null;
     if (typeof item.content !== "string") return null;
-    history.push({ role: item.role, content: item.content });
+    const content = item.content.trim();
+    if (content.length < 1 || content.length > 1000) return null;
+    history.push({ role: item.role, content });
   }
 
   return history;
