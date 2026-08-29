@@ -16,6 +16,12 @@ const DEFAULT_MODEL = "z-ai/glm-5.3-flash";
 const MAX_BODY_BYTES = 64 * 1024;
 const AREA_IDS = AREAS.map((area) => area.id);
 const REPORT_KINDS = ["on", "off", "unsure"] as const;
+const OFF_TOPIC_TEXT = {
+  en: "I can only help with household power status, safety, and Area Reports.",
+  bn: "আমি শুধু বাসার বিদ্যুৎ অবস্থা, নিরাপত্তা ও এলাকার রিপোর্ট নিয়ে সাহায্য করতে পারি।",
+  mixed:
+    "Ami shudhu household power status, safety, ar Area Report niye help korte pari.",
+} as const;
 
 export const config = {
   path: "/api/assistant",
@@ -89,8 +95,14 @@ function classifierBody(model: string, request: AssistantRequest) {
     messages: [
       {
         role: "system",
-        content:
-          "Classify the message for Batti. Use only the supplied Area IDs. A Report must have an on, off, or unsure reportKind; all other intents must use null.",
+        content: [
+          "Classify the message for Batti.",
+          `Known Areas: ${JSON.stringify(
+            AREAS.map(({ id, name }) => ({ id, name })),
+          )}.`,
+          "A named known Area overrides selected Area; otherwise use selectedAreaId.",
+          "A Report must have an on, off, or unsure reportKind; all other intents must use null.",
+        ].join(" "),
       },
       {
         role: "user",
@@ -199,6 +211,7 @@ function streamGuidance(
       const decoder = new TextDecoder();
       let buffer = "";
       let finished = false;
+      let hasAcknowledgement = false;
 
       const processFrame = (frame: string) => {
         const data = frame
@@ -225,6 +238,8 @@ function streamGuidance(
         const content = first.delta.content;
         if (content === undefined || content === null) return;
         if (typeof content !== "string") throw new Error("malformed_sse");
+        if (content.trim().length === 0) return;
+        hasAcknowledgement = true;
         controller.enqueue(encodeEvent({ type: "delta", text: content }));
       };
 
@@ -252,6 +267,7 @@ function streamGuidance(
         }
 
         if (classification.intent === "report") {
+          if (!hasAcknowledgement) throw new Error("missing_acknowledgement");
           controller.enqueue(
             encodeEvent({
               type: "report_draft",
@@ -263,7 +279,6 @@ function streamGuidance(
         controller.enqueue(encodeEvent({ type: "done" }));
       } catch {
         controller.enqueue(encodeEvent({ type: "error", code: "stream_failed" }));
-        controller.enqueue(encodeEvent({ type: "done" }));
       } finally {
         reader.releaseLock();
         controller.close();
@@ -279,18 +294,60 @@ function streamGuidance(
   });
 }
 
-async function readRequest(request: Request): Promise<AssistantRequest | null> {
-  const contentLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) return null;
+type RequestReadResult =
+  | { request: AssistantRequest }
+  | { error: "invalid_request" | "body_too_large" };
 
-  const text = await request.text();
-  if (!text || new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
-    return null;
+async function readRequest(request: Request): Promise<RequestReadResult> {
+  const contentLength = request.headers.get("content-length");
+  if (
+    contentLength !== null &&
+    Number.isFinite(Number(contentLength)) &&
+    Number(contentLength) > MAX_BODY_BYTES
+  ) {
+    return { error: "body_too_large" };
   }
+  if (!request.body) return { error: "invalid_request" };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
   try {
-    return validateAssistantRequest(JSON.parse(text));
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > MAX_BODY_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The body is rejected regardless of an upstream cancellation error.
+        }
+        return { error: "body_too_large" };
+      }
+      chunks.push(value);
+    }
   } catch {
-    return null;
+    return { error: "invalid_request" };
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (byteLength === 0) return { error: "invalid_request" };
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    const parsed = validateAssistantRequest(
+      JSON.parse(new TextDecoder().decode(bytes)),
+    );
+    return parsed ? { request: parsed } : { error: "invalid_request" };
+  } catch {
+    return { error: "invalid_request" };
   }
 }
 
@@ -313,10 +370,14 @@ export function createAssistantHandler(
       return jsonError({ type: "error", code: "provider_failed" }, 500);
     }
 
-    const parsed = await readRequest(request);
-    if (!parsed) {
+    const readResult = await readRequest(request);
+    if ("error" in readResult) {
+      if (readResult.error === "body_too_large") {
+        return jsonError({ type: "error", code: "invalid_request" }, 413);
+      }
       return jsonError({ type: "error", code: "invalid_request" }, 400);
     }
+    const parsed = readResult.request;
 
     const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
     let classifierResponse: Response;
@@ -346,7 +407,7 @@ export function createAssistantHandler(
       return eventStream([
         {
           type: "delta",
-          text: "I can only help with household power status, safety, and Area Reports.",
+          text: OFF_TOPIC_TEXT[classification.language],
         },
         { type: "done" },
       ]);

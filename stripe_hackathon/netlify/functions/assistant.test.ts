@@ -40,6 +40,18 @@ function request(body: unknown = validRequest()): Request {
   });
 }
 
+function streamedRequest(
+  body: ReadableStream<Uint8Array>,
+  headers: Record<string, string> = {},
+): Request {
+  return new Request("http://localhost/api/assistant", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+}
+
 function openRouterJson(content: string): Response {
   return Response.json({ choices: [{ message: { content } }] });
 }
@@ -149,6 +161,21 @@ describe("assistant Netlify Function", () => {
     );
     expect(guidanceBody.stream).toBe(true);
 
+    const classifierSystemText = classifierBody.messages
+      .filter((message: { role: string }) => message.role === "system")
+      .map((message: { content: string }) => message.content)
+      .join("\n");
+    for (const area of AREAS) {
+      expect(classifierSystemText).toContain(area.id);
+      expect(classifierSystemText).toContain(area.name);
+    }
+    expect(classifierSystemText).toContain(
+      "named known Area overrides selected Area",
+    );
+    expect(classifierSystemText).toContain(
+      "otherwise use selectedAreaId",
+    );
+
     const systemText = guidanceBody.messages
       .filter((message: { role: string }) => message.role === "system")
       .map((message: { content: string }) => message.content)
@@ -204,24 +231,82 @@ describe("assistant Netlify Function", () => {
     ]);
   });
 
-  test("redirects off-topic messages without a second provider call", async () => {
+  test("fails a Report stream that finishes without a non-empty acknowledgement", async () => {
     const requestFetch = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(classification({ intent: "off_topic" }));
+      .mockResolvedValueOnce(
+        classification({ intent: "report", reportKind: "off" }),
+      )
+      .mockResolvedValueOnce(
+        upstreamStream([
+          'data: {"choices":[{"delta":{"content":"   "}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
 
     const response = await createAssistantHandler(requestFetch)(
-      request(validRequest("Write me a poem")),
+      request(validRequest("Dhanmondi off")),
     );
-    const output = await events(response);
 
-    expect(requestFetch).toHaveBeenCalledTimes(1);
-    expect(output).toHaveLength(2);
-    expect(output[0]).toMatchObject({ type: "delta" });
-    expect((output[0] as Extract<AssistantEvent, { type: "delta" }>).text).toContain(
-      "power",
-    );
-    expect(output[1]).toEqual({ type: "done" });
+    expect(await events(response)).toEqual([
+      { type: "error", code: "stream_failed" },
+    ]);
   });
+
+  test("parses fragmented delimiters and combined upstream SSE frames", async () => {
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(classification())
+      .mockResolvedValueOnce(
+        upstreamStream([
+          'data: {"choices":[{"delta":{"content":"A"}}]}\n',
+          '\ndata: {"choices":[{"delta":{"content":"B"}}]}\n\ndata: [DO',
+          "NE]\n\n",
+        ]),
+      );
+
+    const response = await createAssistantHandler(requestFetch)(request());
+
+    expect(await events(response)).toEqual([
+      { type: "delta", text: "A" },
+      { type: "delta", text: "B" },
+      { type: "done" },
+    ]);
+  });
+
+  test.each([
+    [
+      "en",
+      "I can only help with household power status, safety, and Area Reports.",
+    ],
+    [
+      "bn",
+      "আমি শুধু বাসার বিদ্যুৎ অবস্থা, নিরাপত্তা ও এলাকার রিপোর্ট নিয়ে সাহায্য করতে পারি।",
+    ],
+    [
+      "mixed",
+      "Ami shudhu household power status, safety, ar Area Report niye help korte pari.",
+    ],
+  ] as const)(
+    "redirects %s off-topic messages without a second provider call",
+    async (language, text) => {
+      const requestFetch = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          classification({ intent: "off_topic", language }),
+        );
+
+      const response = await createAssistantHandler(requestFetch)(
+        request(validRequest("Write me a poem")),
+      );
+
+      expect(requestFetch).toHaveBeenCalledTimes(1);
+      expect(await events(response)).toEqual([
+        { type: "delta", text },
+        { type: "done" },
+      ]);
+    },
+  );
 
   test("rejects a missing server API key before calling the provider", async () => {
     delete process.env.OPENROUTER_API_KEY;
@@ -231,6 +316,77 @@ describe("assistant Netlify Function", () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "provider_failed" });
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  test("rejects non-POST requests", async () => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const response = await createAssistantHandler(requestFetch)(
+      new Request("http://localhost/api/assistant", { method: "GET" }),
+    );
+
+    expect(response.status).toBe(405);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  test("rejects unsupported content types", async () => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const response = await createAssistantHandler(requestFetch)(
+      new Request("http://localhost/api/assistant", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: JSON.stringify(validRequest()),
+      }),
+    );
+
+    expect(response.status).toBe(415);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  test("rejects an oversized declared body without reading it", async () => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const response = await createAssistantHandler(requestFetch)(
+      streamedRequest(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(encoder.encode("{}"));
+            controller.close();
+          },
+        }),
+        { "content-length": String(64 * 1024 + 1) },
+      ),
+    );
+
+    expect(response.status).toBe(413);
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  test("cancels a chunked body as soon as it exceeds the byte cap", async () => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const cancel = vi.fn();
+    let pulls = 0;
+    const chunk = new Uint8Array(16 * 1024);
+    const response = await createAssistantHandler(requestFetch)(
+      streamedRequest(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulls += 1;
+            if (pulls <= 8) {
+              controller.enqueue(chunk);
+            } else {
+              controller.close();
+            }
+          },
+          cancel,
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(413);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(pulls).toBeLessThan(10);
     expect(requestFetch).not.toHaveBeenCalled();
   });
 
@@ -285,6 +441,34 @@ describe("assistant Netlify Function", () => {
     expect(await response.text()).not.toContain("report_draft");
   });
 
+  test("rejects a Report classification without a Report kind", async () => {
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        classification({ intent: "report", reportKind: null }),
+      );
+
+    const response = await createAssistantHandler(requestFetch)(request());
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "classification_failed" });
+    expect(requestFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects a question classification with a Report kind", async () => {
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        classification({ intent: "question", reportKind: "off" }),
+      );
+
+    const response = await createAssistantHandler(requestFetch)(request());
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "classification_failed" });
+    expect(requestFetch).toHaveBeenCalledTimes(1);
+  });
+
   test("returns provider failure for a non-2xx classifier response", async () => {
     const requestFetch = vi
       .fn<typeof fetch>()
@@ -309,6 +493,19 @@ describe("assistant Netlify Function", () => {
     expect(await response.text()).not.toContain("report_draft");
   });
 
+  test("returns provider failure for a non-2xx second-stage response", async () => {
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(classification())
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }));
+
+    const response = await createAssistantHandler(requestFetch)(request());
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "provider_failed" });
+    expect(requestFetch).toHaveBeenCalledTimes(2);
+  });
+
   test("emits stream failure for malformed upstream SSE and no Report draft", async () => {
     const requestFetch = vi
       .fn<typeof fetch>()
@@ -324,10 +521,7 @@ describe("assistant Netlify Function", () => {
     );
     const output = await events(response);
 
-    expect(output).toEqual([
-      { type: "error", code: "stream_failed" },
-      { type: "done" },
-    ]);
+    expect(output).toEqual([{ type: "error", code: "stream_failed" }]);
     expect(output.some((event) => event.type === "report_draft")).toBe(false);
   });
 
@@ -361,7 +555,6 @@ describe("assistant Netlify Function", () => {
     expect(output).toEqual([
       { type: "delta", text: "Bujhlam" },
       { type: "error", code: "stream_failed" },
-      { type: "done" },
     ]);
     expect(output.some((event) => event.type === "report_draft")).toBe(false);
   });
