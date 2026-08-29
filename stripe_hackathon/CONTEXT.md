@@ -7,6 +7,8 @@ A Dhaka household product: people in an Area see whether power is up or down, an
 **Batti**:
 The Crowd-facing board for Dhaka load-shedding. Named after the Bangla word for a lamp.
 _Avoid_: Dashboard, app, Gridwatch
+
+**Crowd**:
 A person in an Area who can view status and submit a Report. v1 has this role only.
 _Avoid_: User, citizen, customer (too vague); Admin (that is a different role)
 
@@ -25,16 +27,24 @@ One Crowd tap of On, Off, or Unsure for one Area at one time. No photo and no lo
 On or Off from the majority of On vs Off Reports in the last 30 minutes in that Area. Unsure does not vote. If there is no Report in 30 minutes, Status is Stale. A tie uses the latest On or Off Report in that window.
 
 **Seed**:
-Mock Reports shipped with the app so the Map and charts are not empty on first load. Seed is not live grid data.
+Mock Reports shipped with the app so the Map and charts are not empty on first load. This month's hour-of-day pattern plus Crowd Reports on top is what looks live. Seed is not live grid data.
 _Avoid_: Live feed, DESCO data, real outage (unless a Crowd Report just happened)
 
 **Forecast**:
 A restore-time guess shown after a short “model” wait. v1 is theater from Seed, not a trained model.
 _Avoid_: ML model, DESCO forecast
 
+**Eta**:
+Minutes until an Area is next expected On or Off, read from this month's Seed. Shown on the Map. Not a trained model.
+_Avoid_: ML prediction, DESCO ETA, predictor agent
+
+**Halo**:
+A large circle on the Map around an Area pin. It glows when Status is On, sits dark when Off, and is grey when Stale.
+_Avoid_: Polygon, feeder boundary, heat map
+
 **Advice**:
 Long-form text for an Area (what to do, typical local setup). v1 is canned copy after the Forecast wait, not a site survey.
 _Avoid_: Engineering plan, solar design
 
 **Map**:
-A geographic view of the twelve Areas. v1 is a map library with pins, not official feeder polygons.
+A geographic view of the twelve Areas. v1 is a map library with pins and Halos, not official feeder polygons.

@@ -27,3 +27,8 @@ export type Forecast = {
   sampleHour: number;
   offCountAtHour: number;
 };
+
+export type Eta = {
+  direction: "on" | "off";
+  minutes: number;
+};

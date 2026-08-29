@@ -1,20 +1,24 @@
 "use client";
 
-import { AREAS, DHAKA_CENTER } from "@/lib/areas";
+import { AREAS } from "@/lib/areas";
 import { loadCrowdReports, saveCrowdReports } from "@/lib/crowd-storage";
+import { curveForMonth } from "@/lib/curves";
+import { dhakaMonth, formatDhakaClock } from "@/lib/dhaka-time";
+import { etaForArea, formatEta } from "@/lib/eta";
 import { forecastForArea } from "@/lib/forecast";
 import { buildSeed } from "@/lib/seed";
 import { statusForArea } from "@/lib/status";
-import type { AreaId, Report, Status } from "@/lib/types";
+import type { AreaId, Eta, Report, Status } from "@/lib/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { ForecastSheet } from "./ForecastSheet";
 
 const BattiMap = dynamic(() => import("./BattiMap"), { ssr: false });
 
-function useNow(intervalMs = 30_000): Date {
-  const [now, setNow] = useState(() => new Date());
+function useNow(intervalMs = 30_000): Date | null {
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
+    setNow(new Date());
     const id = window.setInterval(() => setNow(new Date()), intervalMs);
     return () => window.clearInterval(id);
   }, [intervalMs]);
@@ -23,7 +27,6 @@ function useNow(intervalMs = 30_000): Date {
 
 export function BattiApp() {
   const now = useNow();
-  const seed = useMemo(() => buildSeed(new Date()), []);
   const [crowd, setCrowd] = useState<Report[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [selectedId, setSelectedId] = useState<AreaId>("dhanmondi");
@@ -40,18 +43,39 @@ export function BattiApp() {
     saveCrowdReports(crowd);
   }, [crowd, hydrated]);
 
+  const seed = useMemo(() => (now ? buildSeed(now) : []), [now]);
   const reports = useMemo(() => [...seed, ...crowd], [seed, crowd]);
-  const selected = AREAS.find((area) => area.id === selectedId) ?? AREAS[0];
-  const status = statusForArea(reports, now, selectedId);
-  const forecast = forecastForArea(seed, selectedId, now);
+  const month = now ? dhakaMonth(now) : 1;
 
   const statusByArea = useMemo(() => {
     const map: Record<string, Status> = {};
+    if (!now) return map;
     for (const area of AREAS) {
       map[area.id] = statusForArea(reports, now, area.id);
     }
     return map;
   }, [reports, now]);
+
+  const etaByArea = useMemo(() => {
+    const map: Record<string, Eta> = {};
+    if (!now) return map;
+    AREAS.forEach((area, areaIndex) => {
+      map[area.id] = etaForArea(
+        curveForMonth(month, areaIndex),
+        now,
+        statusByArea[area.id] ?? "stale",
+      );
+    });
+    return map;
+  }, [month, now, statusByArea]);
+
+  const selected = AREAS.find((area) => area.id === selectedId) ?? AREAS[0];
+  const status = now
+    ? statusForArea(reports, now, selectedId)
+    : "stale";
+  const forecast = now
+    ? forecastForArea(seed, selectedId, now)
+    : { typicalRestoreMinutes: 45, sampleHour: 0, offCountAtHour: 0 };
 
   function tap(kind: Report["kind"]) {
     const next: Report = {
@@ -64,9 +88,7 @@ export function BattiApp() {
 
   function openForecast(id: AreaId) {
     setSelectedId(id);
-    const reduce =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) {
       setSheet("ready");
       return;
@@ -75,16 +97,39 @@ export function BattiApp() {
     window.setTimeout(() => setSheet("ready"), 1500);
   }
 
+  if (!now) {
+    return (
+      <div className="app">
+        <header className="top">
+          <div>
+            <p className="brand">Batti</p>
+            <p className="tag">Dhaka</p>
+          </div>
+          <span className="live-stamp">Sample pattern</span>
+        </header>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="top">
         <div>
           <p className="brand">Batti</p>
-          <p className="tag">Crowd board for Dhaka cuts · not live DESCO</p>
+          <p className="tag">
+            <time dateTime={now.toISOString()}>{formatDhakaClock(now)}</time>
+            {" · Dhaka"}
+          </p>
         </div>
-        <div className={`pill status-${status}`}>
-          <span>{selected.name}</span>
-          <strong>{status}</strong>
+        <div className="top-meta">
+          <span className="live-stamp">Sample pattern</span>
+          <div className={`pill status-${status}`}>
+            <span>{selected.name}</span>
+            <strong>{status}</strong>
+            {etaByArea[selectedId] ? (
+              <em>{formatEta(etaByArea[selectedId])}</em>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -113,6 +158,7 @@ export function BattiApp() {
           <BattiMap
             areas={AREAS}
             statusByArea={statusByArea}
+            etaByArea={etaByArea}
             selectedId={selectedId}
             onSelect={(id) => openForecast(id)}
             center={[selected.lat, selected.lng]}
@@ -129,6 +175,9 @@ export function BattiApp() {
                   <span>{area.name}</span>
                   <em className={`status-${statusByArea[area.id]}`}>
                     {statusByArea[area.id]}
+                    {etaByArea[area.id]
+                      ? ` · ${formatEta(etaByArea[area.id])}`
+                      : ""}
                   </em>
                 </button>
               </li>
