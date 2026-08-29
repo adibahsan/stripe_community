@@ -50,6 +50,21 @@ export type Messages = {
   languageEn: string;
   languageBn: string;
   hourStripLabel: string;
+  timeline: string;
+  timelineNow: string;
+  timelinePast: string;
+  timelinePrediction: string;
+  jumpToNow: string;
+  guideTitle: string;
+  guideGotIt: string;
+  guideMap: string;
+  guideMapBody: string;
+  guideTimeline: string;
+  guideTimelineBody: string;
+  guideReport: string;
+  guideReportBody: string;
+  guideMore: string;
+  guideMoreBody: string;
   areas: Record<AreaId, string>;
   status: Record<Status, string>;
   kind: Record<"on" | "off" | "unsure", string>;
@@ -135,6 +150,25 @@ const EN: Messages = {
   languageEn: "EN",
   languageBn: "বাংলা",
   hourStripLabel: "Last six hours, sample pattern",
+  timeline: "Time",
+  timelineNow: "Now",
+  timelinePast: "7 days ago",
+  timelinePrediction: "3 days ahead · sample pattern",
+  jumpToNow: "Jump to now",
+  guideTitle: "How Batti works",
+  guideGotIt: "Got it",
+  guideMap: "Map",
+  guideMapBody:
+    "Tap a neighborhood outline to select it. Glow is On, dark is Off, grey is Stale.",
+  guideTimeline: "Timeline",
+  guideTimelineBody:
+    "Use the bar at the bottom to move through the last 7 days, now, and 3 days ahead. The map follows that time. Ahead of now is the sample pattern, not a trained forecast.",
+  guideReport: "Report",
+  guideReportBody:
+    "Tap Report, then On, Off, or Unsure for the selected Area. Unsure does not vote.",
+  guideMore: "List, Forecast, Ask Batti",
+  guideMoreBody:
+    "List jumps to an Area. Forecast shows the sample restore guess. Ask Batti answers from Status and Crowd evidence. EN / বাংলা switches language.",
   areas: EN_AREAS,
   status: { on: "on", off: "off", stale: "stale" },
   kind: { on: "On", off: "Off", unsure: "Unsure" },
@@ -191,6 +225,25 @@ const BN: Messages = {
   languageEn: "EN",
   languageBn: "বাংলা",
   hourStripLabel: "গত ছয় ঘণ্টা, নমুনা প্যাটার্ন",
+  timeline: "সময়",
+  timelineNow: "এখন",
+  timelinePast: "৭ দিন আগে",
+  timelinePrediction: "৩ দিন এগিয়ে · নমুনা প্যাটার্ন",
+  jumpToNow: "এখনকার সময়ে যান",
+  guideTitle: "বত্তি কীভাবে কাজ করে",
+  guideGotIt: "বুঝেছি",
+  guideMap: "মানচিত্র",
+  guideMapBody:
+    "এলাকার আউটলাইন ট্যাপ করে বেছে নিন। আলো মানে চালু, অন্ধকার মানে বন্ধ, ধূসর মানে পুরনো।",
+  guideTimeline: "সময়রেখা",
+  guideTimelineBody:
+    "নিচের বার দিয়ে গত ৭ দিন, এখন, ও আগামী ৩ দিন দেখুন। মানচিত্র সেই সময় অনুসারে বদলায়। এখনকার পরের অংশ নমুনা প্যাটার্ন, প্রশিক্ষিত পূর্বাভাস নয়।",
+  guideReport: "রিপোর্ট",
+  guideReportBody:
+    "রিপোর্ট ট্যাপ করে নির্বাচিত এলাকায় চালু, বন্ধ, বা অনিশ্চিত দিন। অনিশ্চিত ভোট গণনা হয় না।",
+  guideMore: "তালিকা, পূর্বাভাস, বত্তিকে জিজ্ঞাসা",
+  guideMoreBody:
+    "তালিকা থেকে এলাকা বেছে নিন। পূর্বাভাস নমুনা পুনরুদ্ধার সময় দেখায়। বত্তি Status ও Crowd প্রমাণ থেকে উত্তর দেয়। EN / বাংলা ভাষা বদলায়।",
   areas: BN_AREAS,
   status: { on: "চালু", off: "বন্ধ", stale: "পুরনো" },
   kind: { on: "চালু", off: "বন্ধ", unsure: "অনিশ্চিত" },

@@ -50,6 +50,17 @@ describe("messagesFor", () => {
     expect(messagesFor("bn").eta).toBe("সম্ভাব্য সময়");
   });
 
+  test("covers timeline and first-visit guide keys", () => {
+    for (const locale of ["en", "bn"] as const) {
+      const m = messagesFor(locale);
+      expect(m.timeline).toBeTruthy();
+      expect(m.jumpToNow).toBeTruthy();
+      expect(m.guideTitle).toBeTruthy();
+      expect(m.guideGotIt).toBeTruthy();
+      expect(m.guideTimelineBody).toBeTruthy();
+    }
+  });
+
   test("invalid locale argument falls back to English messages", () => {
     expect(messagesFor("xx" as "en").brand).toBe("Batti");
   });

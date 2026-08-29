@@ -1,15 +1,18 @@
 import { AREAS } from "./areas";
 import { curveForMonth } from "./curves";
 import { dhakaHour, dhakaMonth } from "./dhaka-time";
+import { FUTURE_MS, PAST_MS, SEED_STEP_MINUTES } from "./timeline";
 import type { AreaId, Report } from "./types";
 
 export function buildSeed(now: Date): Report[] {
   const reports: Report[] = [];
   const month = dhakaMonth(now);
+  const stepMs = SEED_STEP_MINUTES * 60_000;
   AREAS.forEach((area, areaIndex) => {
     const curve = curveForMonth(month, areaIndex);
-    for (let minutesAgo = 35; minutesAgo <= 360; minutesAgo += 20) {
-      const at = new Date(now.getTime() - minutesAgo * 60_000);
+    for (let offset = -PAST_MS; offset <= FUTURE_MS; offset += stepMs) {
+      if (offset === 0) continue;
+      const at = new Date(now.getTime() + offset);
       reports.push({
         areaId: area.id,
         kind: curve[dhakaHour(at)] ?? "on",

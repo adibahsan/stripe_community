@@ -17,12 +17,19 @@ import {
 } from "@/lib/i18n";
 import { buildSeed } from "@/lib/seed";
 import { statusForArea } from "@/lib/status";
+import { clampViewTime, isLive, snapViewTime } from "@/lib/timeline";
 import type { AreaId, Eta, Report, ReportKind, Status } from "@/lib/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BattiAssistant } from "./BattiAssistant";
 import { FloatingReportControl } from "./FloatingReportControl";
 import { ForecastSheet } from "./ForecastSheet";
+import {
+  loadGuideDismissed,
+  OnboardingGuide,
+  saveGuideDismissed,
+} from "./OnboardingGuide";
+import { TimeScrubber } from "./TimeScrubber";
 
 const BattiMap = dynamic(() => import("./BattiMap"), { ssr: false });
 
@@ -51,6 +58,8 @@ export function BattiApp() {
     useState<AssistantForecast | null>(null);
   const [locale, setLocale] = useState<Locale>("en");
   const [reportFlash, setReportFlash] = useState<string | null>(null);
+  const [offsetMs, setOffsetMs] = useState(0);
+  const [guideOpen, setGuideOpen] = useState(false);
   const listTriggerRef = useRef<HTMLButtonElement>(null);
   const listCloseRef = useRef<HTMLButtonElement>(null);
   const forecastTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -60,6 +69,7 @@ export function BattiApp() {
   useEffect(() => {
     setCrowd(loadCrowdReports());
     setLocale(loadLocale());
+    setGuideOpen(!loadGuideDismissed());
     setHydrated(true);
   }, []);
 
@@ -108,45 +118,66 @@ export function BattiApp() {
 
   const seed = useMemo(() => (now ? buildSeed(now) : []), [now]);
   const reports = useMemo(() => [...seed, ...crowd], [seed, crowd]);
-  const month = now ? dhakaMonth(now) : 1;
+  const viewTime = now
+    ? snapViewTime(now, new Date(now.getTime() + offsetMs))
+    : null;
+  const month = viewTime ? dhakaMonth(viewTime) : 1;
 
   const statusByArea = useMemo(() => {
     const map: Record<string, Status> = {};
-    if (!now) return map;
+    if (!viewTime) return map;
     for (const area of AREAS) {
-      map[area.id] = statusForArea(reports, now, area.id);
+      map[area.id] = statusForArea(reports, viewTime, area.id);
     }
     return map;
-  }, [reports, now]);
+  }, [reports, viewTime]);
 
   const etaByArea = useMemo(() => {
     const map: Record<string, Eta> = {};
-    if (!now) return map;
+    if (!viewTime) return map;
     AREAS.forEach((area, areaIndex) => {
       map[area.id] = etaForArea(
         curveForMonth(month, areaIndex),
-        now,
+        viewTime,
         statusByArea[area.id] ?? "stale",
       );
     });
     return map;
-  }, [month, now, statusByArea]);
+  }, [month, viewTime, statusByArea]);
 
   const assistantAreas = useMemo(
     () =>
-      now
-        ? buildAssistantAreas({ now, crowd, statusByArea, etaByArea })
+      viewTime
+        ? buildAssistantAreas({
+            now: viewTime,
+            crowd,
+            statusByArea,
+            etaByArea,
+          })
         : [],
-    [now, crowd, statusByArea, etaByArea],
+    [viewTime, crowd, statusByArea, etaByArea],
   );
 
   const selected = AREAS.find((area) => area.id === selectedId) ?? AREAS[0];
   const selectedLabel = copy.areas[selectedId] ?? selected.name;
-  const status = now ? statusForArea(reports, now, selectedId) : "stale";
-  const forecast = now
-    ? forecastForArea(seed, selectedId, now)
+  const status = viewTime
+    ? statusForArea(reports, viewTime, selectedId)
+    : "stale";
+  const forecast = viewTime
+    ? forecastForArea(seed, selectedId, viewTime)
     : { typicalRestoreMinutes: 45, sampleHour: 0, offCountAtHour: 0 };
   const selectedEta = etaByArea[selectedId];
+
+  function setViewTime(next: Date) {
+    if (!now) return;
+    const snapped = snapViewTime(now, clampViewTime(now, next));
+    setOffsetMs(isLive(now, snapped) ? 0 : snapped.getTime() - now.getTime());
+  }
+
+  function dismissGuide() {
+    saveGuideDismissed();
+    setGuideOpen(false);
+  }
 
   function submitReport(areaId: AreaId, kind: ReportKind) {
     setSelectedId(areaId);
@@ -227,7 +258,7 @@ export function BattiApp() {
     setSelectedId(areaId);
     setAssistantForecast({
       areaId,
-      ...forecastForArea(seed, areaId, now ?? new Date()),
+      ...forecastForArea(seed, areaId, viewTime ?? now ?? new Date()),
     });
     closeForecast(false);
     setAssistantVisibility(true);
@@ -237,7 +268,7 @@ export function BattiApp() {
     setLocale(next);
   }
 
-  if (!now) {
+  if (!now || !viewTime) {
     return (
       <div className="app">
         <main className="map-shell map-loading" aria-busy="true">
@@ -271,7 +302,9 @@ export function BattiApp() {
         <div className="brand-pill">
           <p className="brand">{copy.brand}</p>
           <p className="tag">
-            <time dateTime={now.toISOString()}>{formatDhakaClock(now)}</time>
+            <time dateTime={viewTime.toISOString()}>
+              {formatDhakaClock(viewTime)}
+            </time>
             {" · "}
             {copy.dhaka}
           </p>
@@ -361,7 +394,16 @@ export function BattiApp() {
             {reportFlash ?? "\u00a0"}
           </p>
         </div>
+
+        <TimeScrubber
+          now={now}
+          viewTime={viewTime}
+          onChange={setViewTime}
+          copy={copy}
+        />
       </div>
+
+      <OnboardingGuide open={guideOpen} onDismiss={dismissGuide} copy={copy} />
 
       {listOpen ? (
         <div
@@ -419,7 +461,7 @@ export function BattiApp() {
           status={status}
           forecast={forecast}
           reports={reports}
-          now={now}
+          now={viewTime}
           phase={sheet}
           locale={locale}
           copy={copy}

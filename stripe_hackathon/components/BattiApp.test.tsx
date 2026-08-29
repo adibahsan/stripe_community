@@ -12,16 +12,22 @@ import React from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AreaId } from "@/lib/types";
 import { BattiApp } from "./BattiApp";
+import { GUIDE_STORAGE_KEY } from "./OnboardingGuide";
 
 vi.mock("next/dynamic", () => ({
   default: () =>
     function MockBattiMap({
       onSelect,
+      statusByArea,
     }: {
       onSelect: (id: AreaId) => void;
+      statusByArea: Record<string, string>;
     }) {
       return (
         <div data-testid="map">
+          <span data-testid="dhanmondi-status">
+            {statusByArea.dhanmondi ?? "stale"}
+          </span>
           <button type="button" onClick={() => onSelect("gulshan")}>
             Select Gulshan on map
           </button>
@@ -84,6 +90,7 @@ function stubMatchMedia(reduce: boolean) {
 beforeEach(() => {
   vi.stubGlobal("React", React);
   window.localStorage.clear();
+  window.localStorage.setItem(GUIDE_STORAGE_KEY, "1");
   stubMatchMedia(true);
 });
 
@@ -253,4 +260,44 @@ test("opening List before Forecast is ready cancels the spin timer", async () =>
   });
   expect(screen.queryByRole("dialog", { name: "Forecast" })).toBeNull();
   expect(screen.getByRole("dialog", { name: "List" })).toBeTruthy();
+});
+
+test("first visit shows the guide; Got it dismisses it", async () => {
+  window.localStorage.removeItem(GUIDE_STORAGE_KEY);
+  render(<BattiApp />);
+  expect(
+    await screen.findByRole("dialog", { name: "How Batti works" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+  expect(screen.queryByRole("dialog", { name: "How Batti works" })).toBeNull();
+  expect(window.localStorage.getItem(GUIDE_STORAGE_KEY)).toBe("1");
+});
+
+test("timeline scrub to the future shows the sample-pattern prediction and Jump to now restores live", async () => {
+  render(<BattiApp />);
+  const slider = (await screen.findByRole("slider")) as HTMLInputElement;
+  expect(Number(slider.max) - Number(slider.min)).toBe(10 * 24 * 60 * 60_000);
+  fireEvent.change(slider, { target: { value: slider.max } });
+  expect(screen.getByRole("status").textContent).toMatch(/sample pattern/i);
+  fireEvent.click(screen.getByRole("button", { name: "Jump to now" }));
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Jump to now" })).toBeNull();
+});
+
+test("scrubbing the timeline changes Dhanmondi status on the map", async () => {
+  render(<BattiApp />);
+  const slider = (await screen.findByRole("slider")) as HTMLInputElement;
+  const live = Number(slider.value);
+  const before = screen.getByTestId("dhanmondi-status").textContent;
+  fireEvent.change(slider, {
+    target: { value: String(live + 8 * 60 * 60_000) },
+  });
+  const afterEight = screen.getByTestId("dhanmondi-status").textContent;
+  fireEvent.change(slider, {
+    target: { value: String(live - 12 * 60 * 60_000) },
+  });
+  const afterTwelveBack = screen.getByTestId("dhanmondi-status").textContent;
+  expect(
+    afterEight !== before || afterTwelveBack !== before,
+  ).toBe(true);
 });

@@ -55,4 +55,14 @@ describe("statusForArea", () => {
   test("a tie uses the latest On or Off Report in the window", () => {
     expect(statusForArea([report(2, "on"), report(9, "off")], now)).toBe("on");
   });
+
+  test("a Report after at must not change Status", () => {
+    const after: Report = {
+      areaId: "dhanmondi",
+      kind: "on",
+      at: new Date(now.getTime() + 60_000).toISOString(),
+    };
+    expect(statusForArea([report(1, "off")], now)).toBe("off");
+    expect(statusForArea([report(1, "off"), after], now)).toBe("off");
+  });
 });

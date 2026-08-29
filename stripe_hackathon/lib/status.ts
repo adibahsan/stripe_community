@@ -8,10 +8,11 @@ export function statusForArea(
   areaId: Report["areaId"] = "dhanmondi",
 ): Status {
   const cutoff = at.getTime() - WINDOW_MS;
-  const inWindow = reports.filter(
-    (report) =>
-      report.areaId === areaId && Date.parse(report.at) >= cutoff,
-  );
+  const atMs = at.getTime();
+  const inWindow = reports.filter((report) => {
+    const t = Date.parse(report.at);
+    return report.areaId === areaId && t >= cutoff && t <= atMs;
+  });
 
   const votes = inWindow.filter((report) => report.kind !== "unsure");
   if (votes.length === 0) return "stale";
