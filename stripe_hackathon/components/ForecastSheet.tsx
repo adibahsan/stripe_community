@@ -2,16 +2,19 @@
 
 import { adviceForArea } from "@/lib/advice";
 import type { Area } from "@/lib/areas";
-import type { Forecast, Report, Status } from "@/lib/types";
-
+import type { Locale, Messages } from "@/lib/i18n";
+import type { AreaId, Forecast, Report, Status } from "@/lib/types";
+import { useEffect, useRef } from "react";
 function HourStrip({
   reports,
   areaId,
   now,
+  label,
 }: {
   reports: readonly Report[];
   areaId: Area["id"];
   now: Date;
+  label: string;
 }) {
   const buckets = [5, 4, 3, 2, 1, 0].map((hoursAgo) => {
     const start = now.getTime() - (hoursAgo + 1) * 60 * 60_000;
@@ -28,7 +31,7 @@ function HourStrip({
   });
 
   return (
-    <div className="hour-strip" aria-label="Last six hours, sample pattern">
+    <div className="hour-strip" aria-label={label}>
       {buckets.map((bucket) => (
         <div key={bucket.hoursAgo} className="hour-col">
           <div className="hour-track">
@@ -46,56 +49,87 @@ function HourStrip({
 
 export function ForecastSheet({
   area,
+  areaLabel,
   status,
   forecast,
   reports,
   now,
   phase,
+  locale,
+  copy,
   onClose,
+  onAskBatti,
 }: {
   area: Area;
+  areaLabel: string;
   status: Status;
   forecast: Forecast;
   reports: readonly Report[];
   now: Date;
   phase: "spin" | "ready";
+  locale: Locale;
+  copy: Messages;
   onClose: () => void;
+  onAskBatti: (areaId: AreaId) => void;
 }) {
-  const advice = adviceForArea(area.id);
+  const advice = adviceForArea(area.id, locale);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
     <div className="sheet-backdrop" role="presentation" onClick={onClose}>
       <aside
         className="sheet"
         role="dialog"
+        aria-modal="true"
         aria-labelledby="sheet-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <button type="button" className="sheet-close" onClick={onClose}>
-          Close
+        <button
+          ref={closeRef}
+          type="button"
+          className="sheet-close"
+          onClick={onClose}
+        >
+          {copy.close}
         </button>
         {phase === "spin" ? (
           <div className="spin">
             <div className="spin-coil" aria-hidden />
-            <p>Running forecast…</p>
-            <p className="spin-sub">Sample pattern, not a trained model</p>
+            <p>{copy.runningForecast}</p>
+            <p className="spin-sub">{copy.forecastSub}</p>
           </div>
         ) : (
           <>
-            <p className="stamp">Sample pattern</p>
-            <h2 id="sheet-title">{area.name}</h2>
+            <p className="stamp">{copy.samplePattern}</p>
+            <h2 id="sheet-title">{areaLabel}</h2>
             <p className="sheet-status">
-              Status now: <strong>{status}</strong>
+              {copy.statusNow(copy.status[status])}
             </p>
             <p className="forecast-line">
-              At this hour this Area usually returns in about{" "}
-              <strong>{forecast.typicalRestoreMinutes} min</strong>
+              {copy.forecastLine(forecast.typicalRestoreMinutes)}
               {forecast.offCountAtHour > 0
-                ? ` · ${forecast.offCountAtHour} Off marks in the Seed at ${forecast.sampleHour}:00 Dhaka`
+                ? copy.forecastSeedNote(
+                    forecast.offCountAtHour,
+                    forecast.sampleHour,
+                  )
                 : ""}
               .
             </p>
-            <HourStrip reports={reports} areaId={area.id} now={now} />
+            <HourStrip
+              reports={reports}
+              areaId={area.id}
+              now={now}
+              label={copy.hourStripLabel}
+            />
             <h3>{advice.headline}</h3>
             <div className="advice-body">
               {advice.body.split("\n\n").map((para) => (
@@ -107,6 +141,13 @@ export function ForecastSheet({
                 <li key={item}>{item}</li>
               ))}
             </ol>
+            <button
+              type="button"
+              className="forecast-ask"
+              onClick={() => onAskBatti(area.id)}
+            >
+              {copy.askBattiAboutThis}
+            </button>
           </>
         )}
       </aside>

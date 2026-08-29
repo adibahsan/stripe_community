@@ -5,7 +5,10 @@ import {
   ASSISTANT_SESSION_LIMIT,
   buildAssistantAreas,
   canSubmitAssistantMessage,
+  cancelReportDraft,
+  confirmReportDraft,
   finishAssistantStream,
+  openConfirmableDraft,
   remainingAssistantMessages,
   validateAssistantRequest,
   validateClassification,
@@ -155,6 +158,101 @@ describe("Assistant session helpers", () => {
     expect(remainingAssistantMessages(19)).toBe(1);
     expect(remainingAssistantMessages(20)).toBe(0);
     expect(remainingAssistantMessages(21)).toBe(0);
+  });
+
+  test("clears a Report draft when a stream errors", () => {
+    const withDraft = appendAssistantEvent(streamingReply(), {
+      type: "report_draft",
+      areaId: "dhanmondi",
+      kind: "off",
+    });
+    const failed = appendAssistantEvent(withDraft, {
+      type: "error",
+      code: "stream_failed",
+    });
+
+    expect(failed.reportDraft).toBeNull();
+    expect(failed.status).toBe("error");
+  });
+});
+
+describe("confirmable Report drafts", () => {
+  test("does not open a draft until the stream is done", () => {
+    const streaming = appendAssistantEvent(streamingReply(), {
+      type: "report_draft",
+      areaId: "dhanmondi",
+      kind: "off",
+    });
+
+    expect(openConfirmableDraft(streaming)).toBeNull();
+  });
+
+  test("opens a pending draft after acknowledgement completion", () => {
+    let state = appendAssistantEvent(streamingReply(), {
+      type: "delta",
+      text: "Got it.",
+    });
+    state = appendAssistantEvent(state, {
+      type: "report_draft",
+      areaId: "dhanmondi",
+      kind: "off",
+    });
+    state = appendAssistantEvent(state, { type: "done" });
+
+    expect(openConfirmableDraft(state)).toEqual({
+      areaId: "dhanmondi",
+      kind: "off",
+      confirmed: false,
+    });
+  });
+
+  test("confirm returns one command and blocks a second confirm", () => {
+    const pending = {
+      areaId: "gulshan" as const,
+      kind: "off" as const,
+      confirmed: false,
+    };
+    const first = confirmReportDraft(pending);
+    const second = confirmReportDraft(first.draft);
+
+    expect(first.command).toEqual({ areaId: "gulshan", kind: "off" });
+    expect(first.draft).toEqual({
+      areaId: "gulshan",
+      kind: "off",
+      confirmed: true,
+    });
+    expect(second.command).toBeNull();
+    expect(second.draft).toEqual(first.draft);
+  });
+
+  test("cancel clears the draft and submits nothing", () => {
+    expect(cancelReportDraft()).toBeNull();
+  });
+
+  test("preserves an explicitly named Area on the draft", () => {
+    let state = appendAssistantEvent(streamingReply(), {
+      type: "report_draft",
+      areaId: "mirpur-10",
+      kind: "on",
+    });
+    state = appendAssistantEvent(state, { type: "done" });
+
+    expect(openConfirmableDraft(state)?.areaId).toBe("mirpur-10");
+  });
+
+  test("leaves no confirmable draft after a failed acknowledgement", () => {
+    let state = appendAssistantEvent(streamingReply(), {
+      type: "delta",
+      text: "Noted",
+    });
+    state = appendAssistantEvent(state, {
+      type: "report_draft",
+      areaId: "dhanmondi",
+      kind: "off",
+    });
+    state = finishAssistantStream(state);
+
+    expect(openConfirmableDraft(state)).toBeNull();
   });
 });
 

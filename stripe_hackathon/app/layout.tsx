@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Literata, Tektur } from "next/font/google";
+import { Noto_Sans_Bengali, Outfit, Tektur } from "next/font/google";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
@@ -9,9 +9,16 @@ const display = Tektur({
   weight: ["500", "700"],
 });
 
-const body = Literata({
+const body = Outfit({
   subsets: ["latin"],
   variable: "--font-body",
+  weight: ["400", "500", "600", "700"],
+});
+
+const bengali = Noto_Sans_Bengali({
+  subsets: ["bengali"],
+  variable: "--font-bengali",
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -26,7 +33,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable}`}>
+    <html
+      lang="en"
+      className={`${display.variable} ${body.variable} ${bengali.variable}`}
+    >
       <body>{children}</body>
     </html>
   );

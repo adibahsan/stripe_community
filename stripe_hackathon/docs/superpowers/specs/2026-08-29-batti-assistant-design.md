@@ -149,13 +149,13 @@ Pure modules should own:
 - request and response validation;
 - parsing Assistant stream events.
 
-The OpenRouter transport stays behind the Netlify Function boundary. No AI SDK is required; native `fetch`, `ReadableStream`, and `EventSource`-compatible server-sent event framing are sufficient.
+The OpenRouter transport stays behind the Next.js App Router route at `/api/assistant` on the Vercel Node runtime. No AI SDK is required; native `fetch`, `ReadableStream`, and server-sent event framing are sufficient.
 
-### Netlify Function
+### API route
 
-A TypeScript function under `netlify/functions/` exposes a dedicated Assistant path. `netlify.toml` configures the functions directory and esbuild bundling while retaining `out/` as the static publish directory.
+[`app/api/assistant/route.ts`](../../app/api/assistant/route.ts) exports `POST` and `runtime = "nodejs"`. The route delegates to `createAssistantHandler(fetch)` in `lib/assistant-server.ts`.
 
-The Function:
+The handler:
 
 1. accepts `POST` only;
 2. validates content type and request size;
@@ -166,11 +166,11 @@ The Function:
 7. performs the relevant response branch;
 8. streams server-sent events to the browser.
 
-The Function exports a Netlify rate-limit configuration for its path. The initial limit is 30 requests per 60 seconds aggregated by IP and domain. The visible 20-message page-session allowance is a product limit, not the security boundary.
+Platform rate limiting for `/api/assistant` should be configured on Vercel. The visible 20-message page-session allowance is a product limit, not the security boundary.
 
 ### Environment
 
-The Function reads:
+The API route reads:
 
 - `OPENROUTER_API_KEY`;
 - `OPENROUTER_MODEL`, defaulting to `z-ai/glm-5.3-flash`;
@@ -221,7 +221,7 @@ Rules:
 
 ### Stream protocol
 
-The Function returns `text/event-stream` with these application events:
+The route returns `text/event-stream` with these application events:
 
 - `delta`: one Guidance or acknowledgement text fragment;
 - `report_draft`: validated Area ID and Report kind, emitted only after acknowledgement completion;
@@ -236,7 +236,7 @@ Both stages use `z-ai/glm-5.3-flash` through OpenRouter.
 
 ### Stage 1: classify
 
-The Function requests strict structured output. The classifier receives:
+The route requests strict structured output. The classifier receives:
 
 - the new message;
 - selected Area;
@@ -275,7 +275,7 @@ For emergencies, Guidance should prioritize immediate safety and referral over c
 
 - The browser holds conversation history in React state only.
 - Refresh clears the history.
-- The Function does not write prompts, responses, or Report drafts to application storage.
+- The route does not write prompts, responses, or Report drafts to application storage.
 - Batti sends the bounded message history, selected Area, and normalized Area summaries to OpenRouter for inference.
 - The product notice must not imply that the external provider has no retention; it states only that Batti does not store the conversation server-side.
 
@@ -283,7 +283,7 @@ For emergencies, Guidance should prioritize immediate safety and referral over c
 
 ### Deterministic suite
 
-`pnpm test` remains network-independent. Tests use a fake OpenRouter transport at the Function's network boundary, not a fake model implementation embedded in product logic.
+`pnpm test` remains network-independent. Tests use a fake OpenRouter transport at the route handler's network boundary, not a fake model implementation embedded in product logic.
 
 Coverage includes:
 
@@ -317,7 +317,7 @@ This command is not part of ordinary `pnpm test`, because network availability, 
 
 ### Manual acceptance
 
-Using the real key on the Netlify runtime:
+Using the real key on the Vercel runtime:
 
 1. select Dhanmondi;
 2. open Ask Batti;

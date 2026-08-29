@@ -66,6 +66,12 @@ export type AssistantReplyState = {
   errorCode: Extract<AssistantEvent, { type: "error" }>["code"] | null;
 };
 
+export type ConfirmableReportDraft = {
+  areaId: AreaId;
+  kind: ReportKind;
+  confirmed: boolean;
+};
+
 export function canSubmitAssistantMessage(submittedCount: number): boolean {
   return submittedCount < ASSISTANT_SESSION_LIMIT;
 }
@@ -91,8 +97,43 @@ export function appendAssistantEvent(
     case "done":
       return { ...state, status: "done" };
     case "error":
-      return { ...state, status: "error", errorCode: event.code };
+      return {
+        ...state,
+        status: "error",
+        errorCode: event.code,
+        reportDraft: null,
+      };
   }
+}
+
+export function openConfirmableDraft(
+  reply: AssistantReplyState,
+): ConfirmableReportDraft | null {
+  if (reply.status !== "done" || !reply.reportDraft) return null;
+  return {
+    areaId: reply.reportDraft.areaId,
+    kind: reply.reportDraft.kind,
+    confirmed: false,
+  };
+}
+
+export function confirmReportDraft(
+  draft: ConfirmableReportDraft | null,
+): {
+  draft: ConfirmableReportDraft | null;
+  command: { areaId: AreaId; kind: ReportKind } | null;
+} {
+  if (!draft || draft.confirmed) {
+    return { draft, command: null };
+  }
+  return {
+    draft: { ...draft, confirmed: true },
+    command: { areaId: draft.areaId, kind: draft.kind },
+  };
+}
+
+export function cancelReportDraft(): null {
+  return null;
 }
 
 export function finishAssistantStream(

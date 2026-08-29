@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:assistant:live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

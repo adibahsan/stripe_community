@@ -1,6 +1,6 @@
 # BATTI-AI-001 — Grounded streaming questions
 
-**Status:** Ready  
+**Status:** Done  
 **Depends on:** Nothing  
 **Blocks:** BATTI-AI-002, BATTI-AI-003, BATTI-AI-004
 
@@ -8,7 +8,7 @@
 
 A Crowd member can open a floating Ask Batti bottom sheet, submit a Bangla, English, or Banglish power question, and receive streamed Guidance grounded in normalized Area evidence.
 
-This is the first end-to-end tracer bullet: browser → Netlify Function → `z-ai/glm-5.3-flash` through OpenRouter → Batti SSE stream → browser.
+This is the first end-to-end tracer bullet: browser → `/api/assistant` (Vercel Node runtime) → `z-ai/glm-5.3-flash` through OpenRouter → Batti SSE stream → browser.
 
 ## Read first
 
@@ -25,7 +25,7 @@ This is the first end-to-end tracer bullet: browser → Netlify Function → `z-
 - Two-stage `question | report | off_topic` classification pipeline
 - Streaming question Guidance
 - Deterministic off-topic redirect
-- Netlify Function configuration and server-side rate limit
+- Next.js App Router Assistant route on Vercel
 - Floating launcher and accessible session-only bottom sheet
 - Six-message request-history bound
 - Real-time remaining count display, without enforcing the final limit yet
@@ -47,10 +47,10 @@ The Report classification contract exists in this ticket, but confirmation and R
 ## Verification
 
 ```bash
-pnpm vitest run lib/assistant.test.ts lib/assistant-stream.test.ts netlify/functions/assistant.test.ts
+pnpm vitest run lib/assistant.test.ts lib/assistant-stream.test.ts lib/assistant-server.test.ts app/api/assistant/route.test.ts
 pnpm test
 pnpm build
-pnpm --package=netlify-cli dlx netlify dev
+pnpm dev
 ```
 
 With `OPENROUTER_API_KEY` configured locally, ask one English and one Banglish Area question and verify streamed responses distinguish Crowd evidence from the Sample pattern.

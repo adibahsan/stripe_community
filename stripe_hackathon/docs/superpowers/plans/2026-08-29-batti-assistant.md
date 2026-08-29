@@ -4,9 +4,9 @@
 
 **Goal:** Add a streaming, grounded Batti Assistant that answers Area questions, drafts confirmable Crowd Reports, and hands off from Forecast without changing Status, Eta, Seed, or Halo rules.
 
-**Architecture:** Keep the Next.js app as a static export and add one TypeScript Netlify Function at `/api/assistant`. The browser sends normalized Area evidence to a two-stage OpenRouter pipeline using `z-ai/glm-5.3-flash`; the Function returns a small SSE protocol consumed by a session-only bottom sheet.
+**Architecture:** Keep the Next.js app on Vercel with one App Router route at `/api/assistant`. The browser sends normalized Area evidence to a two-stage OpenRouter pipeline using `z-ai/glm-5.3-flash`; the route returns a small SSE protocol consumed by a session-only bottom sheet.
 
-**Tech Stack:** Next.js 15 static export, React 19, TypeScript, Vitest, Netlify Functions, native `fetch`/`ReadableStream`, OpenRouter Chat Completions.
+**Tech Stack:** Next.js 15 App Router, React 19, TypeScript, Vitest, Vercel Node runtime, native `fetch`/`ReadableStream`, OpenRouter Chat Completions.
 
 ## Global Constraints
 

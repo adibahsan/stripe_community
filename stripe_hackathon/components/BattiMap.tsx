@@ -1,13 +1,21 @@
 "use client";
 
 import type { Area } from "@/lib/areas";
-import { formatEta } from "@/lib/eta";
+import { formatEtaLocalized, type Locale } from "@/lib/i18n";
 import type { Eta, Status } from "@/lib/types";
 import { useEffect } from "react";
-import { Circle, CircleMarker, LayerGroup, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
+import {
+  Circle,
+  CircleMarker,
+  LayerGroup,
+  MapContainer,
+  TileLayer,
+  Tooltip,
+  useMap,
+} from "react-leaflet";
 
 const STATUS_COLOR: Record<Status, string> = {
-  on: "#3d9b6a",
+  on: "#1f8f5f",
   off: "#c23b2a",
   stale: "#8a8478",
 };
@@ -40,7 +48,7 @@ function haloOptions(status: Status, selected: boolean) {
     return {
       className: "halo-on",
       color: "#e8a317",
-      fillColor: "#3d9b6a",
+      fillColor: "#1f8f5f",
       fillOpacity: 0.28,
       weight: selected ? 2.5 : 1.5,
       opacity: 0.95,
@@ -58,18 +66,22 @@ function haloOptions(status: Status, selected: boolean) {
 
 export default function BattiMap({
   areas,
+  labels,
   statusByArea,
   etaByArea,
   selectedId,
   onSelect,
   center,
+  locale,
 }: {
   areas: readonly Area[];
+  labels: Record<string, string>;
   statusByArea: Record<string, Status>;
   etaByArea: Record<string, Eta>;
   selectedId: string;
   onSelect: (id: Area["id"]) => void;
   center: [number, number];
+  locale: Locale;
 }) {
   return (
     <MapContainer
@@ -78,6 +90,7 @@ export default function BattiMap({
       scrollWheelZoom
       className="batti-map"
       attributionControl
+      aria-label="Dhaka Areas map"
     >
       <TileLayer
         attribution="&copy; OpenStreetMap"
@@ -89,6 +102,7 @@ export default function BattiMap({
         const eta = etaByArea[area.id];
         const selected = area.id === selectedId;
         const select = { click: () => onSelect(area.id) };
+        const name = labels[area.id] ?? area.name;
         return (
           <LayerGroup key={area.id}>
             <Circle
@@ -113,8 +127,12 @@ export default function BattiMap({
                 permanent={selected}
                 className="batti-tip"
               >
-                <span className="tip-name">{area.name}</span>
-                {eta ? <span className="tip-eta">{formatEta(eta)}</span> : null}
+                <span className="tip-name">{name}</span>
+                {eta ? (
+                  <span className="tip-eta">
+                    {formatEtaLocalized(eta, locale)}
+                  </span>
+                ) : null}
               </Tooltip>
             </CircleMarker>
           </LayerGroup>

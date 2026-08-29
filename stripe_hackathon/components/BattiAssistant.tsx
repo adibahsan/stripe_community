@@ -3,7 +3,11 @@
 import {
   appendAssistantEvent,
   ASSISTANT_SESSION_LIMIT,
+  canSubmitAssistantMessage,
+  cancelReportDraft,
+  confirmReportDraft,
   finishAssistantStream,
+  openConfirmableDraft,
   remainingAssistantMessages,
 } from "@/lib/assistant";
 import type {
@@ -11,9 +15,16 @@ import type {
   AssistantForecast,
   AssistantMessage,
   AssistantReplyState,
+  ConfirmableReportDraft,
 } from "@/lib/assistant";
 import { parseAssistantStream } from "@/lib/assistant-stream";
-import type { AreaId } from "@/lib/types";
+import {
+  ASSISTANT_EXAMPLES,
+  formatEtaLocalized,
+  type Locale,
+  type Messages,
+} from "@/lib/i18n";
+import type { AreaId, ReportKind, Status } from "@/lib/types";
 import {
   useEffect,
   useRef,
@@ -27,17 +38,20 @@ type BattiAssistantProps = {
   selectedAreaId: AreaId;
   areas: AssistantArea[];
   forecast: AssistantForecast | null;
+  onConfirmReport: (areaId: AreaId, kind: ReportKind) => void;
+  locale: Locale;
+  copy: Messages;
 };
 
 type ConversationMessage =
   | (AssistantMessage & { id: number; role: "user" })
-  | { id: number; role: "assistant"; reply: AssistantReplyState };
-
-const EXAMPLES = [
-  "Dhanmondi te batti ache?",
-  "Current chole gese",
-  "Outage er jonno ki prepare korbo?",
-];
+  | {
+      id: number;
+      role: "assistant";
+      reply: AssistantReplyState;
+      draft: ConfirmableReportDraft | null;
+      incomplete: boolean;
+    };
 
 const EMPTY_REPLY: AssistantReplyState = {
   content: "",
@@ -60,25 +74,34 @@ export function BattiAssistant({
   selectedAreaId,
   areas,
   forecast,
+  onConfirmReport,
+  locale,
+  copy,
 }: BattiAssistantProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState("");
   const [submittedCount, setSubmittedCount] = useState(0);
   const [activeRequest, setActiveRequest] = useState(false);
+  const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const requestActiveRef = useRef(false);
   const nextIdRef = useRef(0);
   const wasOpenRef = useRef(false);
   const selectedArea =
     areas.find((area) => area.id === selectedAreaId) ?? areas[0];
   const remaining = remainingAssistantMessages(submittedCount);
+  const atLimit = !canSubmitAssistantMessage(submittedCount);
   const latestMessage = messages[messages.length - 1];
   const liveReplyId =
     latestMessage?.role === "assistant" ? latestMessage.id : undefined;
+  const showFallback =
+    latestMessage?.role === "assistant" &&
+    (latestMessage.reply.status === "error" || latestMessage.incomplete);
+  const examples = ASSISTANT_EXAMPLES[locale];
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -107,27 +130,25 @@ export function BattiAssistant({
     onOpenChange(false);
   }
 
-  function updateReply(
+  function updateAssistantMessage(
     id: number,
-    update: (reply: AssistantReplyState) => AssistantReplyState,
+    update: (
+      message: Extract<ConversationMessage, { role: "assistant" }>,
+    ) => Extract<ConversationMessage, { role: "assistant" }>,
   ) {
     setMessages((current) =>
       current.map((message) =>
         message.id === id && message.role === "assistant"
-          ? { ...message, reply: update(message.reply) }
+          ? update(message)
           : message,
       ),
     );
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const message = input.trim();
-    if (!message || requestActiveRef.current) {
-      return;
-    }
-    requestActiveRef.current = true;
+  async function sendMessage(message: string) {
+    if (!message || requestActiveRef.current || atLimit) return;
 
+    requestActiveRef.current = true;
     const history = messages
       .map(historyMessage)
       .filter((item): item is AssistantMessage => item !== null)
@@ -139,9 +160,16 @@ export function BattiAssistant({
     setMessages((current) => [
       ...current,
       { id: userId, role: "user", content: message },
-      { id: replyId, role: "assistant", reply: EMPTY_REPLY },
+      {
+        id: replyId,
+        role: "assistant",
+        reply: EMPTY_REPLY,
+        draft: null,
+        incomplete: false,
+      },
     ]);
     setInput("");
+    setLastFailedPrompt(message);
     setSubmittedCount((count) => count + 1);
     setActiveRequest(true);
 
@@ -166,20 +194,38 @@ export function BattiAssistant({
       for await (const streamEvent of parseAssistantStream(response.body)) {
         const nextReply = appendAssistantEvent(reply, streamEvent);
         reply = nextReply;
-        updateReply(replyId, () => nextReply);
+        updateAssistantMessage(replyId, (current) => ({
+          ...current,
+          reply: nextReply,
+          draft: openConfirmableDraft(nextReply),
+          incomplete: false,
+        }));
       }
       const finishedReply = finishAssistantStream(reply);
       if (finishedReply !== reply) {
-        updateReply(replyId, () => finishedReply);
+        updateAssistantMessage(replyId, (current) => ({
+          ...current,
+          reply: finishedReply,
+          draft: null,
+          incomplete: Boolean(finishedReply.content.trim()),
+        }));
+      } else {
+        setLastFailedPrompt(null);
       }
-    } catch (error) {
+    } catch {
       if (!controller.signal.aborted) {
-        updateReply(replyId, (reply) =>
-          appendAssistantEvent(reply, {
+        updateAssistantMessage(replyId, (current) => {
+          const failed = appendAssistantEvent(current.reply, {
             type: "error",
             code: "stream_failed",
-          }),
-        );
+          });
+          return {
+            ...current,
+            reply: failed,
+            draft: null,
+            incomplete: Boolean(failed.content.trim()),
+          };
+        });
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
@@ -187,6 +233,45 @@ export function BattiAssistant({
       setActiveRequest(false);
     }
   }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await sendMessage(input.trim());
+  }
+
+  function handleConfirm(id: number) {
+    const message = messages.find(
+      (item) => item.id === id && item.role === "assistant",
+    );
+    if (!message || message.role !== "assistant") return;
+    const result = confirmReportDraft(message.draft);
+    if (result.command) {
+      onConfirmReport(result.command.areaId, result.command.kind);
+    }
+    updateAssistantMessage(id, (current) => ({
+      ...current,
+      draft: result.draft,
+    }));
+  }
+
+  function handleCancel(id: number) {
+    updateAssistantMessage(id, (message) => ({
+      ...message,
+      draft: cancelReportDraft(),
+    }));
+  }
+
+  function handleRetry() {
+    if (!lastFailedPrompt || activeRequest || atLimit) return;
+    void sendMessage(lastFailedPrompt);
+  }
+
+  const status: Status = selectedArea?.status ?? "stale";
+  const etaLabel = selectedArea
+    ? formatEtaLocalized(selectedArea.eta, locale)
+    : "";
+  const selectedLabel =
+    copy.areas[selectedAreaId] ?? selectedArea?.name ?? selectedAreaId;
 
   return (
     <>
@@ -198,7 +283,7 @@ export function BattiAssistant({
         aria-expanded={open}
         onClick={() => onOpenChange(true)}
       >
-        Ask Batti
+        {copy.askBatti}
       </button>
 
       <dialog
@@ -211,110 +296,204 @@ export function BattiAssistant({
         }}
       >
         <section className="assistant-sheet">
-            <header className="assistant-header">
-              <div>
-                <p className="assistant-kicker">Selected Area</p>
-                <h2 id="assistant-heading">Ask Batti</h2>
-                <p className="assistant-area">{selectedArea?.name}</p>
-              </div>
-              <button
-                type="button"
-                className="assistant-close"
-                aria-label="Close Ask Batti"
-                onClick={close}
-              >
-                Close
-              </button>
-            </header>
-
-            {messages.length === 0 ? (
-              <div className="assistant-intro">
-                <p className="assistant-privacy">
-                  Your message and selected Area are sent to an AI provider.
-                  Batti does not store conversation history server-side.
-                </p>
-                <p>Try asking:</p>
-                <div className="assistant-examples">
-                  {EXAMPLES.map((example) => (
-                    <button
-                      key={example}
-                      type="button"
-                      onClick={() => {
-                        setInput(example);
-                        inputRef.current?.focus();
-                      }}
-                    >
-                      {example}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div ref={messagesRef} className="assistant-messages">
-              {messages.map((message) =>
-                message.role === "user" ? (
-                  <article
-                    key={message.id}
-                    className="assistant-message assistant-message-user"
-                  >
-                    <span>You</span>
-                    <p>{message.content}</p>
-                  </article>
-                ) : (
-                  <article
-                    key={message.id}
-                    className="assistant-message assistant-message-batti"
-                  >
-                    <span>Batti</span>
-                    <p
-                      aria-live={
-                        message.id === liveReplyId ? "polite" : undefined
-                      }
-                      aria-busy={
-                        message.id === liveReplyId &&
-                        message.reply.status === "streaming"
-                      }
-                    >
-                      {message.reply.status === "error"
-                        ? "Response incomplete."
-                        : message.reply.content ||
-                          (message.reply.status === "streaming"
-                            ? "Thinking…"
-                            : "I could not complete that response.")}
-                      {message.reply.status === "streaming" ? (
-                        <i className="assistant-cursor" aria-hidden="true" />
-                      ) : null}
-                    </p>
-                  </article>
-                ),
-              )}
+          <header className="assistant-header">
+            <div>
+              <p className="assistant-kicker">{copy.selectedArea}</p>
+              <h2 id="assistant-heading">{copy.askBatti}</h2>
+              <p className="assistant-area">{selectedLabel}</p>
             </div>
+            <button
+              type="button"
+              className="assistant-close"
+              aria-label={copy.close}
+              onClick={close}
+            >
+              {copy.close}
+            </button>
+          </header>
 
-            <form className="assistant-form" onSubmit={submit}>
-              <label htmlFor="assistant-question">
-                Ask in Bangla, English, or Banglish
-              </label>
-              <div>
-                <input
-                  ref={inputRef}
-                  id="assistant-question"
-                  value={input}
-                  maxLength={1000}
-                  disabled={activeRequest}
-                  onChange={(event) => setInput(event.currentTarget.value)}
-                />
-                <button
-                  type="submit"
-                  disabled={activeRequest || input.trim().length === 0}
+          {messages.length === 0 ? (
+            <div className="assistant-intro">
+              <p className="assistant-privacy">{copy.privacy}</p>
+              <p>{copy.tryAsking}</p>
+              <div className="assistant-examples">
+                {examples.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => {
+                      setInput(example);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div ref={messagesRef} className="assistant-messages">
+            {messages.map((message) =>
+              message.role === "user" ? (
+                <article
+                  key={message.id}
+                  className="assistant-message assistant-message-user"
                 >
-                  Send
+                  <span>{copy.you}</span>
+                  <p>{message.content}</p>
+                </article>
+              ) : (
+                <article
+                  key={message.id}
+                  className="assistant-message assistant-message-batti"
+                >
+                  <span>{copy.brand}</span>
+                  <p
+                    aria-live={
+                      message.id === liveReplyId ? "polite" : undefined
+                    }
+                    aria-busy={
+                      message.id === liveReplyId &&
+                      message.reply.status === "streaming"
+                    }
+                  >
+                    {message.reply.status === "error" &&
+                    !message.reply.content.trim()
+                      ? copy.responseIncomplete
+                      : message.reply.content ||
+                        (message.reply.status === "streaming"
+                          ? copy.thinking
+                          : copy.couldNotComplete)}
+                    {message.incomplete ||
+                    (message.reply.status === "error" &&
+                      message.reply.content.trim())
+                      ? copy.incompleteMark
+                      : ""}
+                    {message.reply.status === "streaming" ? (
+                      <i className="assistant-cursor" aria-hidden="true" />
+                    ) : null}
+                  </p>
+
+                  {message.draft && !message.draft.confirmed ? (
+                    <div className="assistant-draft">
+                      <p>
+                        {copy.draftFor(
+                          copy.areas[message.draft.areaId] ??
+                            message.draft.areaId,
+                          copy.kind[message.draft.kind],
+                        )}
+                      </p>
+                      <p className="assistant-draft-note">{copy.draftNote}</p>
+                      <div className="assistant-draft-actions">
+                        <button
+                          type="button"
+                          className="assistant-confirm"
+                          onClick={() => handleConfirm(message.id)}
+                        >
+                          {copy.confirm}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCancel(message.id)}
+                        >
+                          {copy.cancel}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {message.draft?.confirmed ? (
+                    <div className="assistant-draft assistant-draft-done">
+                      <p>{copy.reportSubmitted}</p>
+                      <div className="assistant-draft-actions">
+                        <button type="button" onClick={close}>
+                          {copy.viewMap}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => inputRef.current?.focus()}
+                        >
+                          {copy.keepAsking}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              ),
+            )}
+
+            {showFallback ? (
+              <div className="assistant-fallback">
+                <p>
+                  {selectedLabel}:{" "}
+                  <strong className={`status-${status}`}>
+                    {copy.status[status]}
+                  </strong>
+                  {etaLabel ? ` · ${etaLabel}` : ""}
+                </p>
+                <p className="assistant-draft-note">{copy.fallbackNote}</p>
+                <div className="assistant-draft-actions">
+                  <button
+                    type="button"
+                    className="tap on"
+                    onClick={() => onConfirmReport(selectedAreaId, "on")}
+                  >
+                    {copy.powerOn}
+                  </button>
+                  <button
+                    type="button"
+                    className="tap off"
+                    onClick={() => onConfirmReport(selectedAreaId, "off")}
+                  >
+                    {copy.powerOff}
+                  </button>
+                  <button
+                    type="button"
+                    className="tap unsure"
+                    onClick={() => onConfirmReport(selectedAreaId, "unsure")}
+                  >
+                    {copy.unsure}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="assistant-retry"
+                  disabled={activeRequest || atLimit || !lastFailedPrompt}
+                  onClick={handleRetry}
+                >
+                  {copy.retry}
                 </button>
               </div>
-              <p className="assistant-remaining">
-                {remaining} of {ASSISTANT_SESSION_LIMIT} messages remaining
-              </p>
-            </form>
+            ) : null}
+          </div>
+
+          <form className="assistant-form" onSubmit={submit}>
+            <label htmlFor="assistant-question">{copy.askLabel}</label>
+            <div>
+              <input
+                ref={inputRef}
+                id="assistant-question"
+                value={input}
+                maxLength={1000}
+                disabled={activeRequest || atLimit}
+                onChange={(event) => setInput(event.currentTarget.value)}
+              />
+              <button
+                type="submit"
+                disabled={
+                  activeRequest || atLimit || input.trim().length === 0
+                }
+              >
+                {copy.send}
+              </button>
+            </div>
+            <p className="assistant-remaining">
+              {atLimit
+                ? copy.sessionLimit
+                : copy.remaining(remaining, ASSISTANT_SESSION_LIMIT)}
+            </p>
+          </form>
         </section>
       </dialog>
     </>
