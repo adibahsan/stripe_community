@@ -1,14 +1,16 @@
 "use client";
 
 import type { Area } from "@/lib/areas";
+import { DHAKA_OUTLINE } from "@/lib/area-polygons";
 import { formatEtaLocalized, type Locale } from "@/lib/i18n";
 import type { Eta, Status } from "@/lib/types";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import type { Path } from "leaflet";
 import {
-  Circle,
   CircleMarker,
   LayerGroup,
   MapContainer,
+  Polygon,
   TileLayer,
   Tooltip,
   useMap,
@@ -20,9 +22,26 @@ const STATUS_COLOR: Record<Status, string> = {
   stale: "#8a8478",
 };
 
-function Recenter({ lat, lng }: { lat: number; lng: number }) {
+function FitDhaka() {
   const map = useMap();
   useEffect(() => {
+    map.fitBounds(DHAKA_OUTLINE as [number, number][], {
+      padding: [24, 24],
+      maxZoom: 12,
+    });
+  }, [map]);
+  return null;
+}
+
+function Recenter({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  const skipFirst = useRef(true);
+  useEffect(() => {
+    // Initial view comes from FitDhaka; only fly on later Area changes.
+    if (skipFirst.current) {
+      skipFirst.current = false;
+      return;
+    }
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) {
       map.setView([lat, lng], map.getZoom());
@@ -64,6 +83,32 @@ function haloOptions(status: Status, selected: boolean) {
   };
 }
 
+function AreaHalo({
+  area,
+  status,
+  selected,
+  onSelect,
+}: {
+  area: Area;
+  status: Status;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const pathRef = useRef<Path | null>(null);
+  useEffect(() => {
+    if (selected) pathRef.current?.bringToFront();
+  }, [selected]);
+
+  return (
+    <Polygon
+      ref={pathRef as never}
+      positions={area.polygon}
+      pathOptions={haloOptions(status, selected)}
+      eventHandlers={{ click: onSelect }}
+    />
+  );
+}
+
 export default function BattiMap({
   areas,
   labels,
@@ -96,20 +141,21 @@ export default function BattiMap({
         attribution="&copy; OpenStreetMap"
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <FitDhaka />
       <Recenter lat={center[0]} lng={center[1]} />
       {areas.map((area) => {
         const status = statusByArea[area.id] ?? "stale";
         const eta = etaByArea[area.id];
         const selected = area.id === selectedId;
-        const select = { click: () => onSelect(area.id) };
+        const select = () => onSelect(area.id);
         const name = labels[area.id] ?? area.name;
         return (
           <LayerGroup key={area.id}>
-            <Circle
-              center={[area.lat, area.lng]}
-              radius={selected ? 2800 : 2000}
-              pathOptions={haloOptions(status, selected)}
-              eventHandlers={select}
+            <AreaHalo
+              area={area}
+              status={status}
+              selected={selected}
+              onSelect={select}
             />
             <CircleMarker
               center={[area.lat, area.lng]}
@@ -120,7 +166,7 @@ export default function BattiMap({
                 fillOpacity: 0.92,
                 weight: selected ? 3 : 1,
               }}
-              eventHandlers={select}
+              eventHandlers={{ click: select }}
             >
               <Tooltip
                 direction="top"
