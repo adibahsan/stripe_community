@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AREAS } from "../../lib/areas";
-import { parseAssistantStream } from "../../lib/assistant-stream";
-import type { AssistantEvent, AssistantRequest } from "../../lib/assistant";
-import { config, createAssistantHandler } from "./assistant";
+import { AREAS } from "./areas";
+import { parseAssistantStream } from "./assistant-stream";
+import type { AssistantEvent, AssistantRequest } from "./assistant";
+import { createAssistantHandler } from "./assistant-server";
 
 const encoder = new TextEncoder();
 
@@ -110,7 +110,7 @@ async function events(response: Response): Promise<AssistantEvent[]> {
   return output;
 }
 
-describe("assistant Netlify Function", () => {
+describe("Assistant server handler", () => {
   beforeEach(() => {
     process.env.OPENROUTER_API_KEY = "test-key";
     delete process.env.OPENROUTER_MODEL;
@@ -686,14 +686,4 @@ describe("assistant Netlify Function", () => {
     expect(output.some((event) => event.type === "report_draft")).toBe(false);
   });
 
-  test("exports the exact Netlify route and rate limit", () => {
-    expect(config).toEqual({
-      path: "/api/assistant",
-      rateLimit: {
-        windowLimit: 30,
-        windowSize: 60,
-        aggregateBy: ["ip", "domain"],
-      },
-    });
-  });
 });

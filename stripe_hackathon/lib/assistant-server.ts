@@ -1,15 +1,15 @@
-import { AREAS } from "../../lib/areas";
+import { AREAS } from "./areas";
 import {
   isRecord,
   validateAssistantRequest,
   validateClassification,
-} from "../../lib/assistant";
+} from "./assistant";
 import type {
   AssistantClassification,
   AssistantEvent,
   AssistantRequest,
-} from "../../lib/assistant";
-import { ASSISTANT_SAFETY } from "../../lib/assistant-safety";
+} from "./assistant";
+import { ASSISTANT_SAFETY } from "./assistant-safety";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "z-ai/glm-5.3-flash";
@@ -28,15 +28,6 @@ const LANGUAGE_INSTRUCTION = {
   mixed:
     "Respond in Banglish/mixed language matching the Crowd member's input.",
 } as const;
-
-export const config = {
-  path: "/api/assistant",
-  rateLimit: {
-    windowLimit: 30,
-    windowSize: 60,
-    aggregateBy: ["ip", "domain"],
-  },
-};
 
 function jsonError(error: AssistantEvent & { type: "error" }, status: number) {
   return Response.json(
