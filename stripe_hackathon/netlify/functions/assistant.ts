@@ -214,8 +214,11 @@ function streamGuidance(
       let hasAcknowledgement = false;
 
       const processFrame = (frame: string) => {
-        const data = frame
-          .split(/\r?\n/)
+        const lines = frame.split(/\r?\n/);
+        if (lines.every((line) => line.startsWith(":") || line.length === 0)) {
+          return;
+        }
+        const data = lines
           .filter((line) => line.startsWith("data:"))
           .map((line) => line.slice(5).trimStart())
           .join("\n");
@@ -238,8 +241,7 @@ function streamGuidance(
         const content = first.delta.content;
         if (content === undefined || content === null) return;
         if (typeof content !== "string") throw new Error("malformed_sse");
-        if (content.trim().length === 0) return;
-        hasAcknowledgement = true;
+        if (content.trim().length > 0) hasAcknowledgement = true;
         controller.enqueue(encodeEvent({ type: "delta", text: content }));
       };
 

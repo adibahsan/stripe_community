@@ -70,6 +70,18 @@ function upstreamStream(fragments: string[]): Response {
   );
 }
 
+function upstreamByteStream(chunks: Uint8Array[]): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
 function classification(
   overrides: Partial<{
     intent: "question" | "report" | "off_topic";
@@ -249,7 +261,83 @@ describe("assistant Netlify Function", () => {
     );
 
     expect(await events(response)).toEqual([
+      { type: "delta", text: "   " },
       { type: "error", code: "stream_failed" },
+    ]);
+  });
+
+  test("preserves whitespace deltas before a valid Report acknowledgement", async () => {
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        classification({ intent: "report", reportKind: "off" }),
+      )
+      .mockResolvedValueOnce(
+        upstreamStream([
+          'data: {"choices":[{"delta":{"content":"\\n "}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"Bujhlam"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+
+    const response = await createAssistantHandler(requestFetch)(
+      request(validRequest("Dhanmondi off")),
+    );
+
+    expect(await events(response)).toEqual([
+      { type: "delta", text: "\n " },
+      { type: "delta", text: "Bujhlam" },
+      { type: "report_draft", areaId: "dhanmondi", kind: "off" },
+      { type: "done" },
+    ]);
+  });
+
+  test("ignores upstream SSE comment and keepalive frames", async () => {
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(classification())
+      .mockResolvedValueOnce(
+        upstreamStream([
+          ": OPENROUTER PROCESSING\n\n",
+          ": keepalive\n\n",
+          'data: {"choices":[{"delta":{"content":"Still here"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+
+    const response = await createAssistantHandler(requestFetch)(request());
+
+    expect(await events(response)).toEqual([
+      { type: "delta", text: "Still here" },
+      { type: "done" },
+    ]);
+  });
+
+  test("decodes a multibyte UTF-8 delta split across upstream chunks", async () => {
+    const bangla = "বিদ্যুৎ";
+    const payload =
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content: bangla } }],
+      })}\n\n` + "data: [DONE]\n\n";
+    const encoded = encoder.encode(payload);
+    const banglaStart = encoder.encode(
+      'data: {"choices":[{"delta":{"content":"',
+    ).length;
+    const requestFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(classification())
+      .mockResolvedValueOnce(
+        upstreamByteStream([
+          encoded.slice(0, banglaStart + 1),
+          encoded.slice(banglaStart + 1),
+        ]),
+      );
+
+    const response = await createAssistantHandler(requestFetch)(request());
+
+    expect(await events(response)).toEqual([
+      { type: "delta", text: bangla },
+      { type: "done" },
     ]);
   });
 
