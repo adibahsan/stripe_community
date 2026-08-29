@@ -57,11 +57,11 @@ export type AssistantEvent =
         | "stream_failed";
     };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isAreaId(value: unknown): value is AreaId {
+export function isAreaId(value: unknown): value is AreaId {
   return typeof value === "string" && AREA_IDS.has(value as AreaId);
 }
 
@@ -79,7 +79,7 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-function isReportKind(value: unknown): value is ReportKind {
+export function isReportKind(value: unknown): value is ReportKind {
   return value === "on" || value === "off" || value === "unsure";
 }
 

@@ -1,8 +1,5 @@
-import { AREAS } from "./areas";
 import type { AssistantEvent } from "./assistant";
-import type { AreaId, ReportKind } from "./types";
-
-const AREA_IDS = new Set<AreaId>(AREAS.map((area) => area.id));
+import { isAreaId, isRecord, isReportKind } from "./assistant";
 
 const ERROR_CODES = new Set([
   "invalid_request",
@@ -11,41 +8,33 @@ const ERROR_CODES = new Set([
   "stream_failed",
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isAreaId(value: unknown): value is AreaId {
-  return typeof value === "string" && AREA_IDS.has(value as AreaId);
-}
-
-function isReportKind(value: unknown): value is ReportKind {
-  return value === "on" || value === "off" || value === "unsure";
-}
-
 function invalidStream(): never {
   throw new Error("invalid_assistant_stream");
 }
 
+function isEmptyObject(value: unknown): value is Record<string, never> {
+  return isRecord(value) && Object.keys(value).length === 0;
+}
+
 function parseFrame(frame: string): AssistantEvent {
   let eventType: string | null = null;
-  let dataLine: string | null = null;
+  const dataLines: string[] = [];
 
   for (const line of frame.split("\n")) {
     if (line.startsWith("event:")) {
       eventType = line.slice("event:".length).trim();
     } else if (line.startsWith("data:")) {
-      dataLine = line.slice("data:".length).trim();
+      dataLines.push(line.slice("data:".length).trim());
     }
   }
 
-  if (!eventType || dataLine === null) {
+  if (!eventType || dataLines.length === 0) {
     invalidStream();
   }
 
   let data: unknown;
   try {
-    data = JSON.parse(dataLine);
+    data = JSON.parse(dataLines.join("\n"));
   } catch {
     invalidStream();
   }
@@ -65,7 +54,7 @@ function parseFrame(frame: string): AssistantEvent {
       return { type: "report_draft", areaId: data.areaId, kind: data.kind };
     }
     case "done": {
-      if (!isRecord(data)) invalidStream();
+      if (!isEmptyObject(data)) invalidStream();
       return { type: "done" };
     }
     case "error": {

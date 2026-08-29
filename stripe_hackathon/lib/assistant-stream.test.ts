@@ -145,4 +145,86 @@ describe("parseAssistantStream", () => {
       "invalid_assistant_stream",
     );
   });
+
+  test("parses frames when the SSE delimiter is split across chunks", async () => {
+    const fragments = [
+      'event: delta\ndata: {"text":"hi"}',
+      '\n\nevent: done\ndata: {}\n\n',
+    ];
+
+    const events = await collectEvents(streamFromFragments(fragments));
+
+    expect(events).toEqual([
+      { type: "delta", text: "hi" },
+      { type: "done" },
+    ]);
+  });
+
+  test("joins multiple data lines with newline before JSON parsing", async () => {
+    const chunk =
+      'event: delta\ndata: {"text":\n' +
+      'data: "joined"}\n\n';
+
+    const events = await collectEvents(streamFromFragments([chunk]));
+
+    expect(events).toEqual([{ type: "delta", text: "joined" }]);
+  });
+
+  test("throws invalid_assistant_stream when delta text is missing", async () => {
+    const chunk = 'event: delta\ndata: {}\n\n';
+
+    await expect(collectEvents(streamFromFragments([chunk]))).rejects.toThrow(
+      "invalid_assistant_stream",
+    );
+  });
+
+  test("throws invalid_assistant_stream when delta text is not a string", async () => {
+    const chunk = 'event: delta\ndata: {"text":123}\n\n';
+
+    await expect(collectEvents(streamFromFragments([chunk]))).rejects.toThrow(
+      "invalid_assistant_stream",
+    );
+  });
+
+  test("throws invalid_assistant_stream for invalid error code", async () => {
+    const chunk = 'event: error\ndata: {"code":"unknown_failure"}\n\n';
+
+    await expect(collectEvents(streamFromFragments([chunk]))).rejects.toThrow(
+      "invalid_assistant_stream",
+    );
+  });
+
+  test("throws invalid_assistant_stream when event line is missing", async () => {
+    const chunk = 'data: {"text":"hi"}\n\n';
+
+    await expect(collectEvents(streamFromFragments([chunk]))).rejects.toThrow(
+      "invalid_assistant_stream",
+    );
+  });
+
+  test("throws invalid_assistant_stream when data line is missing", async () => {
+    const chunk = 'event: delta\n\n';
+
+    await expect(collectEvents(streamFromFragments([chunk]))).rejects.toThrow(
+      "invalid_assistant_stream",
+    );
+  });
+
+  test("throws invalid_assistant_stream when done payload is not an object", async () => {
+    await expect(
+      collectEvents(streamFromFragments(['event: done\ndata: []\n\n'])),
+    ).rejects.toThrow("invalid_assistant_stream");
+
+    await expect(
+      collectEvents(streamFromFragments(['event: done\ndata: "x"\n\n'])),
+    ).rejects.toThrow("invalid_assistant_stream");
+  });
+
+  test("throws invalid_assistant_stream when done payload is not empty", async () => {
+    const chunk = 'event: done\ndata: {"extra":"field"}\n\n';
+
+    await expect(collectEvents(streamFromFragments([chunk]))).rejects.toThrow(
+      "invalid_assistant_stream",
+    );
+  });
 });
