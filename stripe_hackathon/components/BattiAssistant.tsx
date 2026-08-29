@@ -4,6 +4,7 @@ import {
   appendAssistantEvent,
   ASSISTANT_SESSION_LIMIT,
   canSubmitAssistantMessage,
+  finishAssistantStream,
 } from "@/lib/assistant";
 import type {
   AssistantArea,
@@ -67,22 +68,40 @@ export function BattiAssistant({
   const [submittedCount, setSubmittedCount] = useState(0);
   const [activeRequest, setActiveRequest] = useState(false);
   const launcherRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController>(null);
+  const requestActiveRef = useRef(false);
   const nextIdRef = useRef(0);
   const wasOpenRef = useRef(false);
   const selectedArea =
     areas.find((area) => area.id === selectedAreaId) ?? areas[0];
   const remaining = ASSISTANT_SESSION_LIMIT - submittedCount;
+  const latestMessage = messages[messages.length - 1];
+  const liveReplyId =
+    latestMessage?.role === "assistant" ? latestMessage.id : undefined;
 
   useEffect(() => {
-    if (open) {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open && !dialog.open) {
+      dialog.showModal();
       window.requestAnimationFrame(() => inputRef.current?.focus());
-    } else if (wasOpenRef.current) {
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+    if (!open && wasOpenRef.current) {
       launcherRef.current?.focus();
     }
     wasOpenRef.current = open;
   }, [open]);
+
+  useEffect(() => {
+    const list = messagesRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [messages]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -106,9 +125,14 @@ export function BattiAssistant({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = input.trim();
-    if (!message || activeRequest || !canSubmitAssistantMessage(submittedCount)) {
+    if (
+      !message ||
+      requestActiveRef.current ||
+      !canSubmitAssistantMessage(submittedCount)
+    ) {
       return;
     }
+    requestActiveRef.current = true;
 
     const history = messages
       .map(historyMessage)
@@ -127,6 +151,7 @@ export function BattiAssistant({
     setSubmittedCount((count) => count + 1);
     setActiveRequest(true);
 
+    let reply = EMPTY_REPLY;
     try {
       const response = await fetch("/api/assistant", {
         method: "POST",
@@ -145,9 +170,13 @@ export function BattiAssistant({
       }
 
       for await (const streamEvent of parseAssistantStream(response.body)) {
-        updateReply(replyId, (reply) =>
-          appendAssistantEvent(reply, streamEvent),
-        );
+        const nextReply = appendAssistantEvent(reply, streamEvent);
+        reply = nextReply;
+        updateReply(replyId, () => nextReply);
+      }
+      const finishedReply = finishAssistantStream(reply);
+      if (finishedReply !== reply) {
+        updateReply(replyId, () => finishedReply);
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -160,6 +189,7 @@ export function BattiAssistant({
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
+      requestActiveRef.current = false;
       setActiveRequest(false);
     }
   }
@@ -177,18 +207,16 @@ export function BattiAssistant({
         Ask Batti
       </button>
 
-      {open ? (
-        <div className="assistant-backdrop" onMouseDown={close}>
-          <section
-            className="assistant-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="assistant-heading"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") close();
-            }}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+      <dialog
+        ref={dialogRef}
+        className="assistant-backdrop"
+        aria-labelledby="assistant-heading"
+        onCancel={(event) => {
+          event.preventDefault();
+          close();
+        }}
+      >
+        <section className="assistant-sheet">
             <header className="assistant-header">
               <div>
                 <p className="assistant-kicker">Selected Area</p>
@@ -229,11 +257,7 @@ export function BattiAssistant({
               </div>
             ) : null}
 
-            <div
-              className="assistant-messages"
-              aria-live="polite"
-              aria-busy={activeRequest}
-            >
+            <div ref={messagesRef} className="assistant-messages">
               {messages.map((message) =>
                 message.role === "user" ? (
                   <article
@@ -249,7 +273,15 @@ export function BattiAssistant({
                     className="assistant-message assistant-message-batti"
                   >
                     <span>Batti</span>
-                    <p>
+                    <p
+                      aria-live={
+                        message.id === liveReplyId ? "polite" : undefined
+                      }
+                      aria-busy={
+                        message.id === liveReplyId &&
+                        message.reply.status === "streaming"
+                      }
+                    >
                       {message.reply.content ||
                         (message.reply.status === "streaming"
                           ? "Thinking…"
@@ -315,12 +347,11 @@ export function BattiAssistant({
                 </button>
               </div>
               <p className="assistant-remaining">
-                {remaining} of {ASSISTANT_SESSION_LIMIT} questions remaining
+                {remaining} of {ASSISTANT_SESSION_LIMIT} messages remaining
               </p>
             </form>
-          </section>
-        </div>
-      ) : null}
+        </section>
+      </dialog>
     </>
   );
 }

@@ -279,7 +279,7 @@ button {
   background: rgba(10, 8, 6, 0.55);
   display: flex;
   justify-content: flex-end;
-  z-index: 500;
+  z-index: 1000;
 }
 
 .sheet {
@@ -306,7 +306,7 @@ button {
   position: fixed;
   right: 1.1rem;
   bottom: 6.7rem;
-  z-index: 450;
+  z-index: 900;
   border: 1px solid var(--sodium);
   background: var(--asphalt);
   color: var(--sodium);
@@ -330,9 +330,23 @@ button {
 .assistant-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 500;
-  display: flex;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: none;
   justify-content: flex-end;
+  background: transparent;
+}
+
+.assistant-backdrop[open] {
+  display: flex;
+}
+
+.assistant-backdrop::backdrop {
   background: rgba(10, 8, 6, 0.62);
 }
 

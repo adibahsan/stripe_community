@@ -5,6 +5,7 @@ import {
   ASSISTANT_SESSION_LIMIT,
   buildAssistantAreas,
   canSubmitAssistantMessage,
+  finishAssistantStream,
   validateAssistantRequest,
   validateClassification,
 } from "./assistant";
@@ -124,6 +125,23 @@ describe("Assistant session helpers", () => {
     expect(done.status).toBe("done");
     expect(afterDone).toBe(done);
     expect(afterError).toBe(failed);
+  });
+
+  test("marks a non-terminal stream EOF as failed", () => {
+    const partial = appendAssistantEvent(streamingReply(), {
+      type: "delta",
+      text: "Power may be ",
+    });
+    const failed = finishAssistantStream(partial);
+    const done = appendAssistantEvent(streamingReply(), { type: "done" });
+
+    expect(failed).toEqual({
+      content: "Power may be ",
+      reportDraft: null,
+      status: "error",
+      errorCode: "stream_failed",
+    });
+    expect(finishAssistantStream(done)).toBe(done);
   });
 
   test("rejects a submission once the page-session limit is reached", () => {
