@@ -15,6 +15,8 @@ export type Messages = {
   powerOn: string;
   powerOff: string;
   unsure: string;
+  report: string;
+  eta: string;
   reportSaved: (kind: string, area: string) => string;
   statusNow: (status: string) => string;
   forecastLine: (minutes: number) => string;
@@ -94,6 +96,8 @@ const EN: Messages = {
   powerOn: "Power on",
   powerOff: "Power off",
   unsure: "Unsure",
+  report: "Report",
+  eta: "Eta",
   reportSaved: (kind, area) => `Saved ${kind} for ${area}`,
   statusNow: (status) => `Status now: ${status}`,
   forecastLine: (minutes) =>
@@ -148,6 +152,8 @@ const BN: Messages = {
   powerOn: "বিদ্যুৎ আছে",
   powerOff: "বিদ্যুৎ নেই",
   unsure: "অনিশ্চিত",
+  report: "রিপোর্ট",
+  eta: "সম্ভাব্য সময়",
   reportSaved: (kind, area) => `${area}-এর জন্য ${kind} সংরক্ষিত`,
   statusNow: (status) => `এখন অবস্থা: ${status}`,
   forecastLine: (minutes) =>

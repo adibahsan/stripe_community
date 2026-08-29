@@ -19,11 +19,14 @@ import { buildSeed } from "@/lib/seed";
 import { statusForArea } from "@/lib/status";
 import type { AreaId, Eta, Report, ReportKind, Status } from "@/lib/types";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BattiAssistant } from "./BattiAssistant";
+import { FloatingReportControl } from "./FloatingReportControl";
 import { ForecastSheet } from "./ForecastSheet";
 
 const BattiMap = dynamic(() => import("./BattiMap"), { ssr: false });
+
+type ForecastPhase = "closed" | "spin" | "ready";
 
 function useNow(intervalMs = 30_000): Date | null {
   const [now, setNow] = useState<Date | null>(null);
@@ -40,13 +43,18 @@ export function BattiApp() {
   const [crowd, setCrowd] = useState<Report[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [selectedId, setSelectedId] = useState<AreaId>("dhanmondi");
-  const [view, setView] = useState<"map" | "list">("map");
-  const [sheet, setSheet] = useState<"closed" | "spin" | "ready">("closed");
+  const [listOpen, setListOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [sheet, setSheet] = useState<ForecastPhase>("closed");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantForecast, setAssistantForecast] =
     useState<AssistantForecast | null>(null);
   const [locale, setLocale] = useState<Locale>("en");
   const [reportFlash, setReportFlash] = useState<string | null>(null);
+  const listTriggerRef = useRef<HTMLButtonElement>(null);
+  const listCloseRef = useRef<HTMLButtonElement>(null);
+  const forecastTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const forecastTimerRef = useRef<number | null>(null);
   const copy = messagesFor(locale);
 
   useEffect(() => {
@@ -65,6 +73,38 @@ export function BattiApp() {
     saveLocale(locale);
     document.documentElement.lang = locale === "bn" ? "bn" : "en";
   }, [locale, hydrated]);
+
+  useEffect(() => {
+    if (!listOpen) return;
+    window.requestAnimationFrame(() => listCloseRef.current?.focus());
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") closeList(true);
+      if (event.key !== "Tab") return;
+      const buttons = listCloseRef.current
+        ?.closest('[role="dialog"]')
+        ?.querySelectorAll<HTMLButtonElement>("button");
+      const first = buttons?.[0];
+      const last = buttons?.[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [listOpen]);
+
+  useEffect(
+    () => () => {
+      if (forecastTimerRef.current !== null) {
+        window.clearTimeout(forecastTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const seed = useMemo(() => (now ? buildSeed(now) : []), [now]);
   const reports = useMemo(() => [...seed, ...crowd], [seed, crowd]);
@@ -119,16 +159,68 @@ export function BattiApp() {
     window.setTimeout(() => setReportFlash(null), 2200);
   }
 
-  function openForecast(id: AreaId) {
-    if (assistantOpen) setAssistantOpen(false);
+  function cancelForecastTimer() {
+    if (forecastTimerRef.current !== null) {
+      window.clearTimeout(forecastTimerRef.current);
+      forecastTimerRef.current = null;
+    }
+  }
+
+  function selectArea(id: AreaId) {
     setSelectedId(id);
+  }
+
+  function openList() {
+    cancelForecastTimer();
+    setSheet("closed");
+    setAssistantOpen(false);
+    setReportOpen(false);
+    setListOpen(true);
+  }
+
+  function closeList(restoreFocus = true) {
+    setListOpen(false);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => listTriggerRef.current?.focus());
+    }
+  }
+
+  function closeForecast(restoreFocus = true) {
+    cancelForecastTimer();
+    setSheet("closed");
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => forecastTriggerRef.current?.focus());
+    }
+  }
+
+  function openForecast(id: AreaId, trigger: HTMLButtonElement) {
+    forecastTriggerRef.current = trigger;
+    setSelectedId(id);
+    setListOpen(false);
+    setAssistantOpen(false);
+    setReportOpen(false);
+    cancelForecastTimer();
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) {
       setSheet("ready");
-      return;
+    } else {
+      setSheet("spin");
+      forecastTimerRef.current = window.setTimeout(() => {
+        forecastTimerRef.current = null;
+        setSheet("ready");
+      }, 1500);
     }
-    setSheet("spin");
-    window.setTimeout(() => setSheet("ready"), 1500);
+  }
+
+  function setAssistantVisibility(open: boolean) {
+    if (open) {
+      cancelForecastTimer();
+      setListOpen(false);
+      setSheet("closed");
+      setReportOpen(false);
+    }
+    setAssistantOpen(open);
+    if (!open) setAssistantForecast(null);
   }
 
   function openAssistantFromForecast(areaId: AreaId) {
@@ -137,8 +229,8 @@ export function BattiApp() {
       areaId,
       ...forecastForArea(seed, areaId, now ?? new Date()),
     });
-    setSheet("closed");
-    setAssistantOpen(true);
+    closeForecast(false);
+    setAssistantVisibility(true);
   }
 
   function setLocaleChoice(next: Locale) {
@@ -148,29 +240,45 @@ export function BattiApp() {
   if (!now) {
     return (
       <div className="app">
-        <header className="top">
-          <div>
+        <main className="map-shell map-loading" aria-busy="true">
+          <div className="brand-pill">
             <p className="brand">{copy.brand}</p>
             <p className="tag">{copy.dhaka}</p>
+            <span className="live-stamp">{copy.samplePattern}</span>
           </div>
-          <span className="live-stamp">{copy.samplePattern}</span>
-        </header>
+          <div aria-hidden="true" />
+        </main>
       </div>
     );
   }
 
   return (
     <div className={`app locale-${locale}`}>
-      <header className="top">
-        <div className="brand-block">
+      <main className="map-shell">
+        <BattiMap
+          areas={AREAS}
+          labels={copy.areas}
+          statusByArea={statusByArea}
+          etaByArea={etaByArea}
+          selectedId={selectedId}
+          onSelect={selectArea}
+          center={[selected.lat, selected.lng]}
+          locale={locale}
+        />
+      </main>
+
+      <div className="floating-layer">
+        <div className="brand-pill">
           <p className="brand">{copy.brand}</p>
           <p className="tag">
             <time dateTime={now.toISOString()}>{formatDhakaClock(now)}</time>
             {" · "}
             {copy.dhaka}
           </p>
+          <span className="live-stamp">{copy.samplePattern}</span>
         </div>
-        <div className="top-meta">
+
+        <div className="top-controls">
           <div className="lang-toggle" role="group" aria-label="Language">
             <button
               type="button"
@@ -187,136 +295,122 @@ export function BattiApp() {
               {copy.languageBn}
             </button>
           </div>
-          <span className="live-stamp">{copy.samplePattern}</span>
+          <button
+            ref={listTriggerRef}
+            type="button"
+            className="bubble"
+            onClick={openList}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 7h14M5 12h14M5 17h14" />
+            </svg>
+            <span className="bubble-label">{copy.list}</span>
+          </button>
+          <button
+            type="button"
+            className="bubble"
+            onClick={(event) => openForecast(selectedId, event.currentTarget)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 17l5-5 4 3 7-8" />
+            </svg>
+            <span className="bubble-label">{copy.forecast}</span>
+          </button>
         </div>
-      </header>
 
-      <section className="route-card" aria-live="polite">
-        <div className="route-stop">
-          <span className="route-label">{selectedLabel}</span>
+        <button
+          type="button"
+          className="status-chip"
+          aria-label={`${copy.forecast} ${selectedLabel}`}
+          onClick={(event) => openForecast(selectedId, event.currentTarget)}
+        >
+          <span>{selectedLabel}</span>
           <strong className={`status-${status}`}>{copy.status[status]}</strong>
-        </div>
-        <div className="route-line" aria-hidden="true" />
-        <div className="route-stop">
-          <span className="route-label">Eta</span>
           <em>
+            {copy.eta}:{" "}
             {selectedEta ? formatEtaLocalized(selectedEta, locale) : "—"}
           </em>
-        </div>
-        <div className="route-line" aria-hidden="true" />
-        <div className="route-stop">
-          <span className="route-label">Report</span>
-          <em>{copy.powerOn} / {copy.powerOff}</em>
-        </div>
-      </section>
+        </button>
 
-      <div className="board">
-        <div className="board-main">
-          <div className="toolbar" role="tablist" aria-label="View">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "map"}
-              className={view === "map" ? "on" : ""}
-              onClick={() => setView("map")}
-            >
-              {copy.map}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "list"}
-              className={view === "list" ? "on" : ""}
-              onClick={() => setView("list")}
-            >
-              {copy.list}
-            </button>
-            <button type="button" onClick={() => openForecast(selectedId)}>
-              {copy.forecast}
-            </button>
-          </div>
-
-          <main className="stage">
-            {view === "map" ? (
-              <BattiMap
-                areas={AREAS}
-                labels={copy.areas}
-                statusByArea={statusByArea}
-                etaByArea={etaByArea}
-                selectedId={selectedId}
-                onSelect={(id) => openForecast(id)}
-                center={[selected.lat, selected.lng]}
-                locale={locale}
-              />
-            ) : (
-              <ul className="area-list">
-                {AREAS.map((area) => (
-                  <li key={area.id}>
-                    <button
-                      type="button"
-                      className={area.id === selectedId ? "selected" : ""}
-                      onClick={() => openForecast(area.id)}
-                    >
-                      <span>{copy.areas[area.id]}</span>
-                      <em className={`status-${statusByArea[area.id]}`}>
-                        {copy.status[statusByArea[area.id] ?? "stale"]}
-                        {etaByArea[area.id]
-                          ? ` · ${formatEtaLocalized(etaByArea[area.id], locale)}`
-                          : ""}
-                      </em>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </main>
-        </div>
-
-        <footer className="dock">
-          <p className="dock-hint">{copy.dockHint(selectedLabel)}</p>
-          <div className="taps">
-            <button
-              type="button"
-              className="tap on"
-              onClick={() => submitReport(selectedId, "on")}
-            >
-              {copy.powerOn}
-            </button>
-            <button
-              type="button"
-              className="tap off"
-              onClick={() => submitReport(selectedId, "off")}
-            >
-              {copy.powerOff}
-            </button>
-            <button
-              type="button"
-              className="tap unsure"
-              onClick={() => submitReport(selectedId, "unsure")}
-            >
-              {copy.unsure}
-            </button>
-          </div>
+        <div className="action-cluster">
+          <FloatingReportControl
+            open={reportOpen}
+            onOpenChange={(open) => {
+              if (open) {
+                cancelForecastTimer();
+                setListOpen(false);
+                setSheet("closed");
+                setAssistantOpen(false);
+              }
+              setReportOpen(open);
+            }}
+            onSubmit={(kind) => submitReport(selectedId, kind)}
+            copy={copy}
+          />
+          <BattiAssistant
+            open={assistantOpen}
+            onOpenChange={setAssistantVisibility}
+            selectedAreaId={selectedId}
+            areas={assistantAreas}
+            forecast={assistantForecast}
+            onConfirmReport={submitReport}
+            locale={locale}
+            copy={copy}
+          />
           <p className="report-flash" aria-live="polite">
             {reportFlash ?? "\u00a0"}
           </p>
-        </footer>
+        </div>
       </div>
 
-      <BattiAssistant
-        open={assistantOpen}
-        onOpenChange={(open) => {
-          if (open) setSheet("closed");
-          setAssistantOpen(open);
-          if (!open) setAssistantForecast(null);
-        }}
-        selectedAreaId={selectedId}
-        areas={assistantAreas}
-        forecast={assistantForecast}
-        onConfirmReport={submitReport}
-        locale={locale}
-        copy={copy}
-      />
+      {listOpen ? (
+        <div
+          className="sheet-backdrop list-backdrop"
+          role="presentation"
+          onClick={() => closeList(true)}
+        >
+          <aside
+            className="sheet list-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={copy.list}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              ref={listCloseRef}
+              type="button"
+              className="sheet-close"
+              onClick={() => closeList(true)}
+            >
+              {copy.close}
+            </button>
+            <ul className="area-list">
+              {AREAS.map((area) => (
+                <li key={area.id}>
+                  <button
+                    type="button"
+                    className={area.id === selectedId ? "selected" : ""}
+                    onClick={() => {
+                      selectArea(area.id);
+                      closeList(true);
+                    }}
+                  >
+                    <span>{copy.areas[area.id]}</span>
+                    <em className={`status-${statusByArea[area.id]}`}>
+                      {copy.status[statusByArea[area.id] ?? "stale"]}
+                      {" · "}
+                      {copy.eta}:{" "}
+                      {etaByArea[area.id]
+                        ? formatEtaLocalized(etaByArea[area.id], locale)
+                        : "—"}
+                    </em>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
+      ) : null}
 
       {sheet !== "closed" ? (
         <ForecastSheet
@@ -329,7 +423,7 @@ export function BattiApp() {
           phase={sheet}
           locale={locale}
           copy={copy}
-          onClose={() => setSheet("closed")}
+          onClose={() => closeForecast(true)}
           onAskBatti={openAssistantFromForecast}
         />
       ) : null}

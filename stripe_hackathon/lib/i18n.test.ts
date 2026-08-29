@@ -44,6 +44,12 @@ describe("messagesFor", () => {
     expect(ASSISTANT_EXAMPLES.bn).toHaveLength(3);
   });
 
+  test("covers report control chrome labels", () => {
+    expect(messagesFor("en").report).toBe("Report");
+    expect(messagesFor("bn").report).toBe("রিপোর্ট");
+    expect(messagesFor("bn").eta).toBe("সম্ভাব্য সময়");
+  });
+
   test("invalid locale argument falls back to English messages", () => {
     expect(messagesFor("xx" as "en").brand).toBe("Batti");
   });
