@@ -57,6 +57,40 @@ export type AssistantEvent =
         | "stream_failed";
     };
 
+export const ASSISTANT_SESSION_LIMIT = 20;
+
+export type AssistantReplyState = {
+  content: string;
+  reportDraft: { areaId: AreaId; kind: ReportKind } | null;
+  status: "streaming" | "done" | "error";
+  errorCode: Extract<AssistantEvent, { type: "error" }>["code"] | null;
+};
+
+export function canSubmitAssistantMessage(submittedCount: number): boolean {
+  return submittedCount < ASSISTANT_SESSION_LIMIT;
+}
+
+export function appendAssistantEvent(
+  state: AssistantReplyState,
+  event: AssistantEvent,
+): AssistantReplyState {
+  if (state.status !== "streaming") return state;
+
+  switch (event.type) {
+    case "delta":
+      return { ...state, content: state.content + event.text };
+    case "report_draft":
+      return {
+        ...state,
+        reportDraft: { areaId: event.areaId, kind: event.kind },
+      };
+    case "done":
+      return { ...state, status: "done" };
+    case "error":
+      return { ...state, status: "error", errorCode: event.code };
+  }
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

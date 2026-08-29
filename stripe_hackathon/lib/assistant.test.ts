@@ -1,11 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { AREAS } from "./areas";
 import {
+  appendAssistantEvent,
+  ASSISTANT_SESSION_LIMIT,
   buildAssistantAreas,
+  canSubmitAssistantMessage,
   validateAssistantRequest,
   validateClassification,
 } from "./assistant";
-import type { AssistantArea, AssistantRequest } from "./assistant";
+import type {
+  AssistantArea,
+  AssistantReplyState,
+  AssistantRequest,
+} from "./assistant";
 import type { AreaId, Report } from "./types";
 
 const now = new Date("2026-08-29T18:00:00.000Z");
@@ -50,6 +57,81 @@ function buildValidRequest(): AssistantRequest {
     },
   };
 }
+
+function streamingReply(): AssistantReplyState {
+  return {
+    content: "",
+    reportDraft: null,
+    status: "streaming",
+    errorCode: null,
+  };
+}
+
+describe("Assistant session helpers", () => {
+  test("concatenates streamed deltas immutably", () => {
+    const initial = streamingReply();
+    const first = appendAssistantEvent(initial, { type: "delta", text: "Power " });
+    const second = appendAssistantEvent(first, { type: "delta", text: "is off." });
+
+    expect(initial.content).toBe("");
+    expect(second).toEqual({
+      ...initial,
+      content: "Power is off.",
+    });
+  });
+
+  test("marks a failed partial stream incomplete", () => {
+    const partial = appendAssistantEvent(streamingReply(), {
+      type: "delta",
+      text: "Power may be ",
+    });
+    const failed = appendAssistantEvent(partial, {
+      type: "error",
+      code: "stream_failed",
+    });
+
+    expect(failed).toEqual({
+      content: "Power may be ",
+      reportDraft: null,
+      status: "error",
+      errorCode: "stream_failed",
+    });
+  });
+
+  test("keeps a Report draft presentational and allows it before completion", () => {
+    const state = appendAssistantEvent(streamingReply(), {
+      type: "report_draft",
+      areaId: "dhanmondi",
+      kind: "off",
+    });
+
+    expect(state.reportDraft).toEqual({ areaId: "dhanmondi", kind: "off" });
+    expect(state.status).toBe("streaming");
+  });
+
+  test("accepts only the first terminal event", () => {
+    const done = appendAssistantEvent(streamingReply(), { type: "done" });
+    const afterDone = appendAssistantEvent(done, {
+      type: "error",
+      code: "provider_failed",
+    });
+    const failed = appendAssistantEvent(streamingReply(), {
+      type: "error",
+      code: "stream_failed",
+    });
+    const afterError = appendAssistantEvent(failed, { type: "done" });
+
+    expect(done.status).toBe("done");
+    expect(afterDone).toBe(done);
+    expect(afterError).toBe(failed);
+  });
+
+  test("rejects a submission once the page-session limit is reached", () => {
+    expect(ASSISTANT_SESSION_LIMIT).toBe(20);
+    expect(canSubmitAssistantMessage(ASSISTANT_SESSION_LIMIT - 1)).toBe(true);
+    expect(canSubmitAssistantMessage(ASSISTANT_SESSION_LIMIT)).toBe(false);
+  });
+});
 
 describe("buildAssistantAreas", () => {
   test("counts Crowd evidence within 30 minutes and ignores older Reports", () => {

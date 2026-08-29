@@ -1,6 +1,7 @@
 "use client";
 
 import { AREAS } from "@/lib/areas";
+import { buildAssistantAreas } from "@/lib/assistant";
 import { loadCrowdReports, saveCrowdReports } from "@/lib/crowd-storage";
 import { curveForMonth } from "@/lib/curves";
 import { dhakaMonth, formatDhakaClock } from "@/lib/dhaka-time";
@@ -11,6 +12,7 @@ import { statusForArea } from "@/lib/status";
 import type { AreaId, Eta, Report, Status } from "@/lib/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
+import { BattiAssistant } from "./BattiAssistant";
 import { ForecastSheet } from "./ForecastSheet";
 
 const BattiMap = dynamic(() => import("./BattiMap"), { ssr: false });
@@ -32,6 +34,7 @@ export function BattiApp() {
   const [selectedId, setSelectedId] = useState<AreaId>("dhanmondi");
   const [view, setView] = useState<"map" | "list">("map");
   const [sheet, setSheet] = useState<"closed" | "spin" | "ready">("closed");
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   useEffect(() => {
     setCrowd(loadCrowdReports());
@@ -68,6 +71,14 @@ export function BattiApp() {
     });
     return map;
   }, [month, now, statusByArea]);
+
+  const assistantAreas = useMemo(
+    () =>
+      now
+        ? buildAssistantAreas({ now, crowd, statusByArea, etaByArea })
+        : [],
+    [now, crowd, statusByArea, etaByArea],
+  );
 
   const selected = AREAS.find((area) => area.id === selectedId) ?? AREAS[0];
   const status = now
@@ -206,6 +217,15 @@ export function BattiApp() {
           </button>
         </div>
       </footer>
+
+      <BattiAssistant
+        open={assistantOpen}
+        onOpenChange={setAssistantOpen}
+        selectedAreaId={selectedId}
+        areas={assistantAreas}
+        forecast={{ areaId: selectedId, ...forecast }}
+        onConfirmReport={(_areaId, kind) => tap(kind)}
+      />
 
       {sheet !== "closed" ? (
         <ForecastSheet
