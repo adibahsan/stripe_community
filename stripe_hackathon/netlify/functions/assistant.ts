@@ -22,6 +22,12 @@ const OFF_TOPIC_TEXT = {
   mixed:
     "Ami shudhu household power status, safety, ar Area Report niye help korte pari.",
 } as const;
+const LANGUAGE_INSTRUCTION = {
+  bn: "Respond only in Bangla.",
+  en: "Respond only in English.",
+  mixed:
+    "Respond in Banglish/mixed language matching the Crowd member's input.",
+} as const;
 
 export const config = {
   path: "/api/assistant",
@@ -182,6 +188,8 @@ function guidanceBody(
         role: "system",
         content: [
           "You are the Batti Assistant. Give concise household power Guidance.",
+          "The validated classification language is authoritative.",
+          LANGUAGE_INSTRUCTION[classification.language],
           ASSISTANT_SAFETY,
           `Trusted Area context: ${JSON.stringify({ area, forecast })}`,
           classification.intent === "report"

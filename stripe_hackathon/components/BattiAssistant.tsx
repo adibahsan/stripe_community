@@ -3,8 +3,8 @@
 import {
   appendAssistantEvent,
   ASSISTANT_SESSION_LIMIT,
-  canSubmitAssistantMessage,
   finishAssistantStream,
+  remainingAssistantMessages,
 } from "@/lib/assistant";
 import type {
   AssistantArea,
@@ -13,7 +13,7 @@ import type {
   AssistantReplyState,
 } from "@/lib/assistant";
 import { parseAssistantStream } from "@/lib/assistant-stream";
-import type { AreaId, ReportKind } from "@/lib/types";
+import type { AreaId } from "@/lib/types";
 import {
   useEffect,
   useRef,
@@ -27,7 +27,6 @@ type BattiAssistantProps = {
   selectedAreaId: AreaId;
   areas: AssistantArea[];
   forecast: AssistantForecast | null;
-  onConfirmReport: (areaId: AreaId, kind: ReportKind) => void;
 };
 
 type ConversationMessage =
@@ -61,7 +60,6 @@ export function BattiAssistant({
   selectedAreaId,
   areas,
   forecast,
-  onConfirmReport: _onConfirmReport,
 }: BattiAssistantProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState("");
@@ -77,7 +75,7 @@ export function BattiAssistant({
   const wasOpenRef = useRef(false);
   const selectedArea =
     areas.find((area) => area.id === selectedAreaId) ?? areas[0];
-  const remaining = ASSISTANT_SESSION_LIMIT - submittedCount;
+  const remaining = remainingAssistantMessages(submittedCount);
   const latestMessage = messages[messages.length - 1];
   const liveReplyId =
     latestMessage?.role === "assistant" ? latestMessage.id : undefined;
@@ -125,11 +123,7 @@ export function BattiAssistant({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = input.trim();
-    if (
-      !message ||
-      requestActiveRef.current ||
-      !canSubmitAssistantMessage(submittedCount)
-    ) {
+    if (!message || requestActiveRef.current) {
       return;
     }
     requestActiveRef.current = true;
@@ -282,43 +276,16 @@ export function BattiAssistant({
                         message.reply.status === "streaming"
                       }
                     >
-                      {message.reply.content ||
-                        (message.reply.status === "streaming"
-                          ? "Thinking…"
-                          : "I could not complete that response.")}
+                      {message.reply.status === "error"
+                        ? "Response incomplete."
+                        : message.reply.content ||
+                          (message.reply.status === "streaming"
+                            ? "Thinking…"
+                            : "I could not complete that response.")}
                       {message.reply.status === "streaming" ? (
                         <i className="assistant-cursor" aria-hidden="true" />
                       ) : null}
                     </p>
-                    {message.reply.status === "error" ? (
-                      <div className="assistant-fallback">
-                        <strong>Response incomplete.</strong>
-                        {selectedArea ? (
-                          <span>
-                            {selectedArea.name} is {selectedArea.status}; Sample
-                            pattern suggests power {selectedArea.eta.direction} in{" "}
-                            {selectedArea.eta.minutes} minutes.
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {message.reply.status === "done" &&
-                    message.reply.reportDraft ? (
-                      <div className="assistant-report-draft">
-                        <strong>Report draft</strong>
-                        <span>
-                          {areas.find(
-                            (area) =>
-                              area.id === message.reply.reportDraft?.areaId,
-                          )?.name ?? message.reply.reportDraft.areaId}
-                          {" · "}
-                          {message.reply.reportDraft.kind}
-                        </span>
-                        <small>
-                          Draft only. It has not changed Crowd Status.
-                        </small>
-                      </div>
-                    ) : null}
                   </article>
                 ),
               )}
@@ -334,14 +301,12 @@ export function BattiAssistant({
                   id="assistant-question"
                   value={input}
                   maxLength={1000}
-                  disabled={activeRequest || remaining === 0}
+                  disabled={activeRequest}
                   onChange={(event) => setInput(event.currentTarget.value)}
                 />
                 <button
                   type="submit"
-                  disabled={
-                    activeRequest || remaining === 0 || input.trim().length === 0
-                  }
+                  disabled={activeRequest || input.trim().length === 0}
                 >
                   Send
                 </button>

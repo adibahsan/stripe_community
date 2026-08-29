@@ -219,6 +219,45 @@ describe("assistant Netlify Function", () => {
     }
   });
 
+  test.each([
+    ["bn", "Respond only in Bangla."],
+    ["en", "Respond only in English."],
+    [
+      "mixed",
+      "Respond in Banglish/mixed language matching the Crowd member's input.",
+    ],
+  ] as const)(
+    "authoritatively requires %s Guidance in the validated response language",
+    async (language, instruction) => {
+      const userText = `private-${language}-question`;
+      const requestFetch = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(classification({ language }))
+        .mockResolvedValueOnce(upstreamStream(["data: [DONE]\n\n"]));
+
+      await createAssistantHandler(requestFetch)(request(validRequest(userText)));
+
+      const guidanceBody = JSON.parse(
+        String((requestFetch.mock.calls[1][1] as RequestInit).body),
+      );
+      const systemText = guidanceBody.messages
+        .filter((message: { role: string }) => message.role === "system")
+        .map((message: { content: string }) => message.content)
+        .join("\n");
+      const userTextContent = guidanceBody.messages
+        .filter((message: { role: string }) => message.role === "user")
+        .map((message: { content: string }) => message.content)
+        .join("\n");
+
+      expect(systemText).toContain(
+        "The validated classification language is authoritative.",
+      );
+      expect(systemText).toContain(instruction);
+      expect(systemText).not.toContain(userText);
+      expect(userTextContent).toContain(userText);
+    },
+  );
+
   test("streams acknowledgement before a Report draft", async () => {
     const requestFetch = vi
       .fn<typeof fetch>()

@@ -6,6 +6,7 @@ import {
   buildAssistantAreas,
   canSubmitAssistantMessage,
   finishAssistantStream,
+  remainingAssistantMessages,
   validateAssistantRequest,
   validateClassification,
 } from "./assistant";
@@ -148,6 +149,12 @@ describe("Assistant session helpers", () => {
     expect(ASSISTANT_SESSION_LIMIT).toBe(20);
     expect(canSubmitAssistantMessage(ASSISTANT_SESSION_LIMIT - 1)).toBe(true);
     expect(canSubmitAssistantMessage(ASSISTANT_SESSION_LIMIT)).toBe(false);
+  });
+
+  test("clamps the displayed remaining message count at zero", () => {
+    expect(remainingAssistantMessages(19)).toBe(1);
+    expect(remainingAssistantMessages(20)).toBe(0);
+    expect(remainingAssistantMessages(21)).toBe(0);
   });
 });
 

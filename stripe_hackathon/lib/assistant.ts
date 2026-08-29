@@ -70,6 +70,10 @@ export function canSubmitAssistantMessage(submittedCount: number): boolean {
   return submittedCount < ASSISTANT_SESSION_LIMIT;
 }
 
+export function remainingAssistantMessages(submittedCount: number): number {
+  return Math.max(0, ASSISTANT_SESSION_LIMIT - submittedCount);
+}
+
 export function appendAssistantEvent(
   state: AssistantReplyState,
   event: AssistantEvent,

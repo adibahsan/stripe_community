@@ -490,26 +490,6 @@ button {
   }
 }
 
-.assistant-fallback,
-.assistant-report-draft {
-  display: grid;
-  gap: 0.25rem;
-  margin-top: 0.65rem;
-  padding: 0.55rem;
-  border-left: 3px solid var(--off);
-  background: rgba(194, 59, 42, 0.08);
-  font-size: 0.82rem;
-}
-
-.assistant-report-draft {
-  border-left-color: var(--on);
-  background: rgba(61, 155, 106, 0.09);
-}
-
-.assistant-report-draft small {
-  color: #6a5f4e;
-}
-
 .assistant-form {
   padding: 0.8rem 1.1rem 1rem;
   border-top: 1px solid var(--fog);

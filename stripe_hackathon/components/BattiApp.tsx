@@ -223,8 +223,7 @@ export function BattiApp() {
         onOpenChange={setAssistantOpen}
         selectedAreaId={selectedId}
         areas={assistantAreas}
-        forecast={{ areaId: selectedId, ...forecast }}
-        onConfirmReport={(_areaId, kind) => tap(kind)}
+        forecast={null}
       />
 
       {sheet !== "closed" ? (
