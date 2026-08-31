@@ -169,6 +169,9 @@ export default function BattiMap({
               eventHandlers={{ click: select }}
             >
               <Tooltip
+                // Leaflet freezes `permanent` when the tooltip is constructed,
+                // so remount on selection change to move the pinned label.
+                key={selected ? "pinned" : "hover"}
                 direction="top"
                 permanent={selected}
                 className="batti-tip"
